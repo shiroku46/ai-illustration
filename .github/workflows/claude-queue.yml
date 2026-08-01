@@ -94,7 +94,12 @@ jobs:
           from pathlib import Path
 
           event_name = os.environ["EVENT_NAME"]
-          event = json.loads(Path(os.environ["EVENT_PATH"]).read_text())
+          event = {}
+          if event_name in {"issues", "issue_comment"}:
+              event_path = os.environ.get("EVENT_PATH", "")
+              if not event_path:
+                  raise RuntimeError(f"Missing event payload for {event_name}")
+              event = json.loads(Path(event_path).read_text())
           actor = os.environ["ACTOR"]
           owner = os.environ["OWNER"]
           configured_owner = os.environ.get("CONFIGURED_OWNER", "")
