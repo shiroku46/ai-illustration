@@ -1,0 +1,33 @@
+<!-- ai-dev-automation-foundation:generated-target -->
+# Installation checklist
+
+- [ ] Optionally set repository variable `AUTOMATION_OWNER` to `shiroku46`; the repository owner is the fail-closed default.
+- [ ] Require the trusted source Issue to allowlist every changed and renamed path; bounded patterns such as `tests/**` may be used.
+- [ ] Keep the ordinary Issue allowlist independent from the protected-change authorization block; every protected path must appear in both.
+- [ ] Confirm the fixed default-branch `trusted-checks.yml` workflow is present.
+- [ ] Confirm candidate jobs are read-only and publish no custom checks or statuses.
+- [ ] Confirm the supervisor validates immutable workflow-run and exact job evidence.
+- [ ] Confirm readiness and merge require successful exact-head native pull-request workflow evidence for `CI`, `Unit Tests`, and `E2E Acceptance` when fixed `e2e.yml` is installed.
+- [ ] Confirm all required native workflow definitions are compared against one stable default-branch commit, and that commit is rechecked after every blob and run query.
+- [ ] Confirm each candidate workflow file blob exactly equals the blob from that one stable default-branch commit before native run evidence is trusted.
+- [ ] Confirm native runs belong to the exact Pull Request and reject missing, pending, failed, stale-SHA, wrong-workflow, wrong-repository, cross-PR, candidate-modified-workflow, and candidate-authored evidence.
+- [ ] Confirm Queue failure creates no routine Issue or Pull Request comment and no failure-state blocked/review label mutation.
+- [ ] Confirm Queue recovery is bounded, deterministic, idempotent, non-notifying, and persists only public-safe records on the fixed internal-stop branch.
+- [ ] Confirm the supervisor reconciles `Claude Issue Queue` completion through `supervisor_queue_recovery_v3` before the final merge guard.
+- [ ] Confirm trusted attestation, native workflow evidence, current source/scope authorization, candidate identity, and merge use one unchanged default-branch SHA.
+- [ ] Confirm final merge re-fetches an open, explicitly non-draft, mergeable exact-head Pull Request with explicit label evidence, no `ai-no-merge`, same-repository provenance, and the same authorized source Issue/scope.
+- [ ] Confirm the final merge evidence gate is single-use and consumed by the first merge attempt, including a rejected attempt.
+- [ ] Confirm the supervisor has only the bounded `contents: write` needed for the fixed `automation-internal-stops` branch.
+- [ ] Confirm internal stops are sanitized canonical JSON at `automation-stops/pr-<number>/<sha>/<REASON>.json` and are never posted as Issue or Pull Request comments or represented by routine label mutations.
+- [ ] Confirm a failed audit or moved head writes no internal-stop record or close action.
+- [ ] Confirm Codex no-progress uses the immutable trusted request timestamp and merge-state no-progress uses the latest immutable clean evidence.
+- [ ] Confirm combined Codex comments and reviews are ordered by immutable event time before the latest exact-SHA evidence is selected.
+- [ ] Confirm only the three canonical account/provider UI reason codes can create a human-only notice.
+- [ ] Confirm account-level repository absence is independently derived from connected GitHub API queries for the exact targets and caller assertions must match that evidence.
+- [ ] Confirm credential and integration-reconnection notices fail closed until a reason-specific connected provider evidence adapter exists.
+- [ ] Confirm every human-only notice re-derives the connected condition inside the final audit, persists an exact deterministic audit record, and rechecks the condition immediately before publication.
+- [ ] Confirm the notice record binds Issue, Pull Request, SHA, attempted connected paths, impossibility evidence, canonical UI action, target/provider, and automatic-resumption condition.
+- [ ] Confirm human-only deduplication requires both the exact persisted record and an immutable `github-actions[bot]` comment.
+- [ ] Configure `CLAUDE_CODE_OAUTH_TOKEN` only through GitHub/provider UI.
+- [ ] Run export guard, validator, and tests.
+- [ ] Validate in a disposable E2E repository.

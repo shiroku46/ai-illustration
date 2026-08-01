@@ -1,0 +1,92 @@
+name: Trusted CI Reconciliation
+
+on:
+  workflow_run:
+    workflows: ["CI", "Unit Tests", "Claude Issue Queue"]
+    types: [completed]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: trusted-ci-reconcile
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  discover:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.name != 'Claude Issue Queue'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      pull-requests: read
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Discover bounded exact-SHA candidates without valid or active attestations
+        id: discover
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          AUTOMATION_OWNER: ${{ vars.AUTOMATION_OWNER || github.repository_owner }}
+        run: |
+          matrix=$(python -m scripts.supervisor_runtime discover)
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  dispatch:
+    needs: discover
+    if: needs.discover.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        target_sha: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch only the fixed trusted workflow on the default branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TARGET_SHA: ${{ matrix.target_sha }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$TARGET_SHA" | grep -Eq '^[0-9a-f]{40}$'
+          gh workflow run trusted-checks.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$DEFAULT_BRANCH" \
+            -f "target_sha=$TARGET_SHA"
+
+  queue_recovery:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.name == 'Claude Issue Queue'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: write
+      contents: write
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Reconcile bounded Queue retries through fixed default-branch code
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          AUTOMATION_OWNER: ${{ vars.AUTOMATION_OWNER || github.repository_owner }}
+        run: python -m scripts.supervisor_queue_recovery_v3

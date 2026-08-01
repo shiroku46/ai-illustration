@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Immutable commit SHA to validate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TARGET_REF: ${{ inputs.target_ref || github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ env.TARGET_REF }}
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+      - name: Parse complete workflow YAML streams with runner-provided Ruby
+        run: |
+          ruby -e 'require "psych"; Dir[".github/workflows/*.{yml,yaml}"].sort.each { |path| documents = Psych.parse_stream(File.read(path)).children; raise "#{path}: expected exactly one YAML document" unless documents.length == 1; puts "parsed #{path}" }'
+      - run: python scripts/public_export_guard.py .
+      - run: python scripts/validate_repository.py

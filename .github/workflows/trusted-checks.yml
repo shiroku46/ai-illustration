@@ -1,0 +1,171 @@
+name: Trusted Exact-SHA Checks
+run-name: Trusted checks ${{ inputs.target_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Immutable same-repository commit SHA to validate
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: trusted-checks-${{ inputs.target_sha }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    name: Authorize exact candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      pr_number: ${{ steps.authorize.outputs.pr_number }}
+    steps:
+      - name: Authorize fixed default-branch workflow and eligible exact candidate
+        id: authorize
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+          CONFIGURED_OWNER: ${{ vars.AUTOMATION_OWNER }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+
+          repository = os.environ["REPOSITORY"]
+          default_branch = os.environ["DEFAULT_BRANCH"]
+          target_sha = os.environ["TARGET_SHA"]
+
+          def gh(*args: str) -> str:
+              return subprocess.run(
+                  ["gh", *args],
+                  text=True,
+                  check=True,
+                  capture_output=True,
+              ).stdout
+
+          def fail(code: str, detail: str) -> None:
+              print(f"{code}: {detail}", file=sys.stderr)
+              raise SystemExit(1)
+
+          if not re.fullmatch(r"[0-9a-f]{40}", target_sha):
+              fail("INVALID_TARGET_SHA", "The target must be one full lowercase commit SHA.")
+
+          resolved = json.loads(gh("api", f"repos/{repository}/commits/{target_sha}"))
+          if resolved.get("sha") != target_sha:
+              fail("UNRESOLVED_TARGET_SHA", "The target did not resolve to itself.")
+
+          expected_workflow = (
+              f"{repository}/.github/workflows/trusted-checks.yml@refs/heads/{default_branch}"
+          )
+          if os.environ["WORKFLOW_REF"] != expected_workflow:
+              fail("UNTRUSTED_WORKFLOW_REF", "The workflow was not loaded from the fixed default-branch path.")
+          if os.environ.get("GITHUB_REF_NAME") != default_branch:
+              fail("UNTRUSTED_DISPATCH_REF", "The workflow dispatch ref is not the default branch.")
+          if os.environ["EVENT_NAME"] != "workflow_dispatch":
+              fail("UNTRUSTED_EVENT", "Only workflow_dispatch is accepted.")
+
+          current_default = json.loads(
+              gh("api", f"repos/{repository}/commits/{default_branch}")
+          ).get("sha")
+          if os.environ["WORKFLOW_SHA"] != current_default:
+              fail("STALE_TRUSTED_WORKFLOW", "The loaded workflow SHA is not the current default-branch SHA.")
+
+          allowed_authors = {os.environ["OWNER"], "github-actions[bot]"}
+          configured_owner = os.environ.get("CONFIGURED_OWNER", "")
+          if configured_owner:
+              allowed_authors.add(configured_owner)
+          if os.environ["ACTOR"] not in allowed_authors:
+              fail("UNTRUSTED_DISPATCH_ACTOR", "The dispatch actor is not authorized.")
+
+          pulls = json.loads(
+              gh(
+                  "api",
+                  "-H",
+                  "Accept: application/vnd.github+json",
+                  f"repos/{repository}/commits/{target_sha}/pulls?per_page=100",
+              )
+          )
+          allowed_prefixes = ("claude-issue-", "automation/", "fix/")
+          for pull in pulls:
+              head = pull.get("head") or {}
+              base = pull.get("base") or {}
+              author = (pull.get("user") or {}).get("login") or ""
+              labels = {label.get("name") for label in pull.get("labels") or []}
+              if (
+                  pull.get("state") == "open"
+                  and head.get("sha") == target_sha
+                  and ((head.get("repo") or {}).get("full_name") == repository)
+                  and ((base.get("repo") or {}).get("full_name") == repository)
+                  and base.get("ref") == default_branch
+                  and author in allowed_authors
+                  and (head.get("ref") or "").startswith(allowed_prefixes)
+                  and "ai-no-merge" not in labels
+              ):
+                  with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                      output.write(f"pr_number={int(pull['number'])}\n")
+                  break
+          else:
+              fail("TARGET_NOT_ELIGIBLE", "No eligible open same-repository Pull Request has this exact head SHA.")
+          PY
+
+  validate_target:
+    name: CI / validate
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      TARGET_SHA: ${{ inputs.target_sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          persist-credentials: false
+      - name: Verify immutable checked-out SHA
+        run: test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+      - name: Parse complete workflow YAML streams
+        run: |
+          ruby -e 'require "psych"; Dir[".github/workflows/*.{yml,yaml}"].sort.each { |path| documents = Psych.parse_stream(File.read(path)).children; raise "#{path}: expected exactly one YAML document" unless documents.length == 1 }'
+      - run: python scripts/public_export_guard.py .
+      - run: python scripts/validate_repository.py
+
+  test_target:
+    name: Unit Tests / test
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      TARGET_SHA: ${{ inputs.target_sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          persist-credentials: false
+      - name: Verify immutable checked-out SHA
+        run: test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s tests

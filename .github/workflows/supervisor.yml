@@ -1,0 +1,38 @@
+name: Trusted Recovery and Merge Supervisor
+
+on:
+  workflow_run:
+    workflows: ["CI", "Unit Tests", "Claude Issue Queue", "Trusted CI Reconciliation", "Trusted Exact-SHA Checks"]
+    types: [completed]
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: foundation-supervisor
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  supervise:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      checks: read
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Reconcile bounded same-repository candidates through the final guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          AUTOMATION_OWNER: ${{ vars.AUTOMATION_OWNER || github.repository_owner }}
+        run: python -m scripts.supervisor_final_guard

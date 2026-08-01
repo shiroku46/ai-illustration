@@ -1,0 +1,34 @@
+name: AI implementation task
+description: One bounded implementation request
+title: "[Task] "
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Allowed paths
+    validations:
+      required: true
+  - type: textarea
+    id: prohibited
+    attributes:
+      label: Prohibited effects
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Required validation
+    validations:
+      required: true
