@@ -199,14 +199,16 @@ def load_review_data(manifest_root: Path, asset_root: Path) -> ReviewData:
 
 def make_review_decision(
     candidate: dict[str, Any], *, decision: str, reviewer: str, categories: list[str],
-    notes: str = "", timestamp: str | None = None,
+    notes: str = "", timestamp: str | None = None, verified_image_sha256: str | None = None,
 ) -> dict[str, Any]:
     if decision not in DECISIONS:
         raise ReviewUIError("unsupported review decision")
     if decision in {"accept", "shortlist"} and (
-        candidate.get("candidate_status") != "technically_valid" or candidate.get("image_available") is not True
+        candidate.get("candidate_status") != "technically_valid"
+        or candidate.get("image_available") is not True
+        or verified_image_sha256 != candidate.get("sha256")
     ):
-        raise ReviewUIError("accept and shortlist require a technically_valid candidate with a verified image")
+        raise ReviewUIError("accept and shortlist require a live verified image matching the candidate checksum")
     if not reviewer or not reviewer.strip():
         raise ReviewUIError("reviewer is required")
     if any(item not in REVIEW_CATEGORIES for item in categories):
