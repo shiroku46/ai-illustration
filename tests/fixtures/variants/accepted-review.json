@@ -1,7 +1,7 @@
 {
   "candidate_ref": "candidate-demo",
   "candidate_request_ref": "request-demo",
-  "candidate_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "candidate_sha256": "31e567633479d71554c5f5b00c7d831aeece9bde5b581216a37ccce20c3f2f66",
   "categories": [],
   "decision": "accept",
   "id": "review-demo",
