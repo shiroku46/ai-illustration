@@ -168,20 +168,25 @@ def load_review_data(manifest_root: Path, asset_root: Path) -> ReviewData:
         if request is None:
             raise ReviewUIError(f"candidate {candidate_id} has no source request")
         character_ref = str(request.data.get("character_ref", ""))
-        character_id = character_ref.rsplit("@", 1)[0]
+        ref_parts = character_ref.rsplit("@", 1)
+        if len(ref_parts) != 2 or not all(ref_parts):
+            raise ReviewUIError(f"request {request.manifest_id} has an invalid character reference")
+        character_id, character_version = ref_parts
         character = indexes["character-spec"].get(character_id)
         if character is None:
             raise ReviewUIError(f"request {request.manifest_id} has no character specification")
+        if character.data.get("version") != character_version:
+            raise ReviewUIError(f"request {request.manifest_id} references a mismatched character version")
         prior = _validated_prior_reviews(candidate_id, candidate, request_id, reviews)
         available = _verified_asset_bytes(asset_root, candidate) is not None
         payload = {
             "id": candidate_id, "request_id": request.manifest_id, "character_id": character_id,
-            "role": character.data.get("role"), "pose": request.data.get("pose"),
-            "expression": request.data.get("expression"), "crop": request.data.get("crop"),
-            "facing": request.data.get("facing"), "tool_id": request.data.get("tool_id"),
-            "model_id": request.data.get("model_id"), "license_status": request.data.get("license_status"),
-            "candidate_status": candidate.get("status"), "sha256": candidate.get("sha256"),
-            "width": candidate.get("width"), "height": candidate.get("height"),
+            "character_version": character_version, "role": character.data.get("role"),
+            "pose": request.data.get("pose"), "expression": request.data.get("expression"),
+            "crop": request.data.get("crop"), "facing": request.data.get("facing"),
+            "tool_id": request.data.get("tool_id"), "model_id": request.data.get("model_id"),
+            "license_status": request.data.get("license_status"), "candidate_status": candidate.get("status"),
+            "sha256": candidate.get("sha256"), "width": candidate.get("width"), "height": candidate.get("height"),
             "color_space": candidate.get("color_space"), "has_alpha": candidate.get("has_alpha"),
             "provenance": candidate.get("provenance"), "image_available": available,
             "image_url": f"/assets/{candidate_id}" if available else None, "reviews": prior,
@@ -198,8 +203,10 @@ def make_review_decision(
 ) -> dict[str, Any]:
     if decision not in DECISIONS:
         raise ReviewUIError("unsupported review decision")
-    if decision in {"accept", "shortlist"} and candidate.get("candidate_status") != "technically_valid":
-        raise ReviewUIError("accept and shortlist require a technically_valid candidate")
+    if decision in {"accept", "shortlist"} and (
+        candidate.get("candidate_status") != "technically_valid" or candidate.get("image_available") is not True
+    ):
+        raise ReviewUIError("accept and shortlist require a technically_valid candidate with a verified image")
     if not reviewer or not reviewer.strip():
         raise ReviewUIError("reviewer is required")
     if any(item not in REVIEW_CATEGORIES for item in categories):
