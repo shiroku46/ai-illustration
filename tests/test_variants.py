@@ -85,7 +85,10 @@ class VariantTests(unittest.TestCase):
         first = plan_variant_set(self.root, "candidate-demo", self.matrix, "evaluation")
         shuffled = {"combinations": list(reversed(self.matrix["combinations"]))}
         second = plan_variant_set(self.root, "candidate-demo", shuffled, "evaluation")
+        expected_path = Path(__file__).parent / "fixtures" / "variants" / "variant-set.json"
+        expected = json.loads(expected_path.read_text(encoding="utf-8"))
         self.assertEqual(first, second)
+        self.assertEqual(first, expected)
         self.assertEqual(validate_variant_set(first, self.root), first)
         self.assertEqual(len(first["variants"]), 2)
         self.assertTrue(all(item["path"].endswith(".png") for item in first["variants"]))
