@@ -166,6 +166,32 @@ def _verify_supplied_png(path: Path, variant: dict[str, Any]) -> tuple[bytes, st
     return payload, actual_sha
 
 
+def _validate_packaged_png(payload: bytes, sidecar: dict[str, Any], field: str) -> None:
+    try:
+        png = _parse_png(payload)
+    except ValueError as exc:
+        raise ExportError("PNG_STRUCTURE", str(exc), field) from exc
+    if not png.has_alpha:
+        raise ExportError("PNG_ALPHA_REQUIRED", "packaged PNG must support alpha", field)
+    if not png.has_srgb:
+        raise ExportError("PNG_SRGB_REQUIRED", "packaged PNG must declare sRGB", field)
+    declarations = {
+        "width": png.width,
+        "height": png.height,
+        "format": "png",
+        "media_type": "image/png",
+        "color_space": "sRGB",
+        "has_alpha": True,
+    }
+    for name, expected in declarations.items():
+        if sidecar.get(name) != expected:
+            raise ExportError(
+                "PNG_DECLARATION_MISMATCH",
+                f"sidecar {name} does not match packaged PNG",
+                field,
+            )
+
+
 def _validate_variant_review_object(
     review: dict[str, Any],
     *,
@@ -496,6 +522,8 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
         if not production and present_review_fields:
             raise ExportError("EVALUATION_REVIEW_CLAIM", "evaluation package must not contain variant approval fields", "items")
 
+        item_payloads: dict[str, bytes] = {}
+        normalized_paths: dict[str, str] = {}
         for path_field, sha_field in (("png_path", "png_sha256"), ("sidecar_path", "sidecar_sha256")):
             path = _safe_relative(item.get(path_field), path_field)
             expected_sha = item.get(sha_field)
@@ -505,6 +533,8 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
             if payload is None or _sha(payload) != expected_sha:
                 raise ExportError("PACKAGE_FILE_MISMATCH", f"missing or modified file: {path}", path)
             expected_files.add(path)
+            item_payloads[path_field] = payload
+            normalized_paths[path_field] = path
 
         variant_id = item.get("variant_id")
         if not isinstance(variant_id, str) or not TOKEN_RE.fullmatch(variant_id):
@@ -515,12 +545,14 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
         expected_index_entries.append({
             "key": paper_theater_key,
             "variant_id": variant_id,
-            "png_path": item["png_path"],
-            "sidecar_path": item["sidecar_path"],
+            "png_path": normalized_paths["png_path"],
+            "sidecar_path": normalized_paths["sidecar_path"],
             "sha256": item["png_sha256"],
         })
-        sidecar_path = item["sidecar_path"]
-        sidecar = _load_object_bytes(inventory[sidecar_path], sidecar_path)
+        sidecar_path = normalized_paths["sidecar_path"]
+        sidecar = _load_object_bytes(item_payloads["sidecar_path"], sidecar_path)
+        if sidecar.get("kind") != "variant-export-sidecar" or sidecar.get("schema_version") != "1.0":
+            raise ExportError("SIDECAR_SCHEMA", "invalid sidecar kind or schema version", sidecar_path)
         sidecar_review_fields = {
             field for field in VARIANT_REVIEW_SIDECAR_FIELDS if field in sidecar
         }
@@ -535,12 +567,31 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
             "variant_id": variant_id,
             "paper_theater_key": paper_theater_key,
             "intent": package.get("intent"),
-            "output_path": item.get("png_path"),
+            "source_candidate_ref": package.get("source_candidate_ref"),
+            "source_request_ref": package.get("source_request_ref"),
+            "review_ref": package.get("review_ref"),
+            "character_ref": package.get("character_ref"),
+            "style_ref": package.get("style_ref"),
+            "source_file": f"{variant_id}.png",
+            "source_sha256": item.get("png_sha256"),
+            "output_path": normalized_paths["png_path"],
             "output_sha256": item.get("png_sha256"),
+            "license_status": package.get("license_status"),
         }
         for field, expected in sidecar_checks.items():
             if sidecar.get(field) != expected:
                 raise ExportError("SIDECAR_BINDING_MISMATCH", f"sidecar {field} does not match package item", sidecar_path)
+        expected_provenance = {
+            "method": "verified-byte-copy",
+            "source_candidate_sha256": package.get("source_candidate_sha256"),
+        }
+        if sidecar.get("provenance") != expected_provenance:
+            raise ExportError(
+                "SIDECAR_BINDING_MISMATCH",
+                "sidecar provenance does not match package",
+                sidecar_path,
+            )
+        _validate_packaged_png(item_payloads["png_path"], sidecar, normalized_paths["png_path"])
 
         if production:
             review_path = _safe_relative(item.get("variant_review_path"), "variant_review_path")
