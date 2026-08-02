@@ -299,8 +299,8 @@ def _parse_png(data: bytes) -> PngInfo:
             seen_iend = True
             if chunk_end != len(data):
                 raise ValueError("trailing bytes after IEND")
-        elif chunk_type[:1].isupper():
-            raise ValueError(f"unsupported critical PNG chunk {chunk_type!r}")
+        else:
+            raise ValueError(f"unsupported PNG chunk {chunk_type!r}")
 
         offset = chunk_end
         chunk_index += 1
