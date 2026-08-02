@@ -10,11 +10,12 @@ The repository defines product, architecture, style, and asset contracts and inc
 - a deterministic local tool/hardware catalog;
 - a non-executing ComfyUI API-workflow adapter that validates workflows and creates dry-run execution plans;
 - a read-only local candidate comparison UI that exports structured review-decision JSON in the browser;
-- deterministic expression/pose variant-set planning bound to one accepted candidate identity.
+- deterministic expression/pose variant-set planning bound to one accepted candidate identity;
+- deterministic packaging of caller-supplied local variant PNGs by verified byte copy, with sidecars and a paper-theater lookup index.
 
-It does **not** install a model, start ComfyUI, contact a server, generate or transform images, or write production PNG files.
+It does **not** install a model, start ComfyUI, contact a server, generate, edit, resize, or re-encode images. Export packaging reads local PNGs, verifies them, and copies their bytes unchanged only when `--write` is explicitly supplied.
 
-Six production manifest types are supported: character specification, style profile, generation request, candidate asset, review decision, and export manifest. Variant-set plans are a separate non-executing planning document for the next production stage.
+Six production manifest types are supported: character specification, style profile, generation request, candidate asset, review decision, and export manifest. Variant-set plans and variant export packages are additional deterministic documents for downstream production stages.
 
 The tool-evaluation catalog can validate synthetic tool/model profiles, list them deterministically, and compare declared hardware requirements with a local hardware profile. Compatibility never implies license or commercial-use approval.
 
@@ -22,7 +23,9 @@ The ComfyUI adapter accepts only loopback HTTP endpoints, rejects credentials an
 
 The review UI binds only to `127.0.0.1`, serves local static files and validated candidate PNGs only, never writes server-side files, and creates review JSON as a browser download.
 
-Variant planning requires one `technically_valid` candidate and the latest exact candidate/request/checksum-bound review to be `accept`. It emits stable variant IDs, planned PNG and sidecar paths, dimensions, identity bindings, unresolved design decisions, and paper-theater lookup keys without writing image bytes.
+Variant planning requires one `technically_valid` candidate, verified source PNG bytes, and the latest exact candidate/request/checksum-bound review to be `accept`. It emits stable variant IDs, planned PNG and sidecar paths, dimensions, identity bindings, unresolved design decisions, and paper-theater lookup keys without writing image bytes.
+
+Variant export requires exactly one supplied local `<variant-id>.png` for every planned variant. It verifies PNG structure, dimensions, sRGB, alpha, and SHA-256; copies bytes unchanged into an atomic package; writes deterministic sidecars, a checksum inventory, and a paper-theater index; and rejects extra, missing, conflicting, escaped, or modified files.
 
 ## Run without installation
 
@@ -36,6 +39,9 @@ PYTHONPATH=src python -m ai_illustration.cli adapter-plan tests/fixtures/valid/g
 PYTHONPATH=src python -m ai_illustration.cli review-ui path/to/manifest-directory --asset-root path/to/asset-directory --port 8765
 PYTHONPATH=src python -m ai_illustration.cli variant-plan path/to/manifest-directory --source-candidate candidate-id --matrix tests/fixtures/variants/matrix.json --intent evaluation
 PYTHONPATH=src python -m ai_illustration.cli variant-check path/to/variant-set.json --manifest-root path/to/manifest-directory
+PYTHONPATH=src python -m ai_illustration.cli variant-export path/to/variant-set.json --manifest-root path/to/manifest-directory --source-root path/to/supplied-variant-pngs --output-root path/to/packages
+PYTHONPATH=src python -m ai_illustration.cli variant-export path/to/variant-set.json --manifest-root path/to/manifest-directory --source-root path/to/supplied-variant-pngs --output-root path/to/packages --write
+PYTHONPATH=src python -m ai_illustration.cli export-check path/to/packages/variant-export-package-ID/package-manifest.json --output-root path/to/packages
 PYTHONPATH=src python -m unittest discover -s tests
 ```
 
@@ -57,9 +63,17 @@ Security boundaries:
 
 ## Reviewed variant planning
 
-A matrix explicitly supplies each requested expression, pose, facing, crop, and optional mouth state. Input order does not affect output. Duplicate combinations, unsafe tokens, stale reviews, mismatched checksums or references, unavailable candidates, unknown provenance, and unapproved production licensing fail closed.
+A matrix explicitly supplies each requested expression, pose, facing, crop, and optional mouth state. Input order does not affect output. Duplicate combinations, unsafe tokens, stale reviews, mismatched checksums or references, unavailable or tampered candidates, unknown provenance, and unapproved production licensing fail closed.
 
 Unresolved stage side, canvas override, editable source format, layer strategy, and mouth-shape granularity remain explicit nullable fields rather than inferred defaults. Evaluation plans remain non-commercial; production plans require approved source request, character, and style licensing states.
+
+## Verified local export packages
+
+The source directory is intentionally strict: it contains only one flat `<variant-id>.png` per canonical variant. Fuzzy lookup, nested source paths, symlinks, and extra files are rejected. Dry run is the default and leaves the output root untouched.
+
+With `--write`, all outputs are built in a temporary directory beneath the output root and atomically published as one content-addressed package directory. Existing identical packages are accepted idempotently; differing packages are never overwritten. `export-check` verifies canonical package JSON and the SHA-256 inventory for every PNG, sidecar, and paper-theater index file.
+
+Evaluation packages remain explicitly non-production. Production packages can only be derived from a canonical production-intent variant set whose license gates already passed.
 
 ## Validation boundaries
 
@@ -78,4 +92,4 @@ The adapter distinguishes planning from authorization:
 - `execute()` is deliberately disabled;
 - no socket, subprocess, external request, model loading, or image output is performed.
 
-No compatibility, adapter, review, or variant-planning result grants a license or approves commercial use.
+No compatibility, adapter, review, variant-planning, or export-packaging result grants a license or approves commercial use.
