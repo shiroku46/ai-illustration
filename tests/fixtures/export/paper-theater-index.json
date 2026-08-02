@@ -1,0 +1,23 @@
+{
+  "entries": [
+    {
+      "key": "boke.boke.neutral.listening.front.full.closed",
+      "png_path": "variants/v1/boke/full/front/listening-neutral-closed/variant-bad0407a3784746a895f.png",
+      "sha256": "1d644375a84ba8f6e77ef1826ba2589d0f7ebca6980235c2e4827ccdfdb8448b",
+      "sidecar_path": "variants/v1/boke/full/front/listening-neutral-closed/variant-bad0407a3784746a895f.json",
+      "variant_id": "variant-bad0407a3784746a895f"
+    },
+    {
+      "key": "boke.boke.smile.talking.front.full",
+      "png_path": "variants/v1/boke/full/front/talking-smile/variant-065de3c2d114fbdcd8ee.png",
+      "sha256": "240621cf7524d21b5379f69bfe6c98cebe1a25838ce46d32bcd5d8b8fabdc091",
+      "sidecar_path": "variants/v1/boke/full/front/talking-smile/variant-065de3c2d114fbdcd8ee.json",
+      "variant_id": "variant-065de3c2d114fbdcd8ee"
+    }
+  ],
+  "id": "paper-theater-index-492ea9ec28416ff748c5",
+  "intent": "evaluation",
+  "kind": "paper-theater-index",
+  "schema_version": "1.0",
+  "variant_set_ref": "variant-set-5a90df4c3ba46c88ff45"
+}
