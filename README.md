@@ -41,6 +41,7 @@ PYTHONPATH=src python -m ai_illustration.cli variant-plan path/to/manifest-direc
 PYTHONPATH=src python -m ai_illustration.cli variant-check path/to/variant-set.json --manifest-root path/to/manifest-directory
 PYTHONPATH=src python -m ai_illustration.cli variant-export path/to/variant-set.json --manifest-root path/to/manifest-directory --source-root path/to/supplied-variant-pngs --output-root path/to/packages
 PYTHONPATH=src python -m ai_illustration.cli variant-export path/to/variant-set.json --manifest-root path/to/manifest-directory --source-root path/to/supplied-variant-pngs --output-root path/to/packages --write
+PYTHONPATH=src python -m ai_illustration.cli variant-export path/to/production-variant-set.json --manifest-root path/to/manifest-directory --source-root path/to/supplied-variant-pngs --approval-root path/to/variant-reviews --output-root path/to/packages --write
 PYTHONPATH=src python -m ai_illustration.cli export-check path/to/packages/variant-export-package-ID/package-manifest.json --output-root path/to/packages
 PYTHONPATH=src python -m unittest discover -s tests
 ```
@@ -73,7 +74,24 @@ The source directory is intentionally strict: it contains only one flat `<varian
 
 With `--write`, all outputs are built in a temporary directory beneath the output root and atomically published as one content-addressed package directory. Existing identical packages are accepted idempotently; differing packages are never overwritten. `export-check` verifies canonical package JSON and the SHA-256 inventory for every PNG, sidecar, and paper-theater index file.
 
-Evaluation packages remain explicitly non-production. Production packages can only be derived from a canonical production-intent variant set whose license gates already passed.
+Evaluation packages remain explicitly non-production and do not accept an approval root. Production packaging additionally requires one canonical `<variant-id>.json` review in `--approval-root` for every supplied PNG. Each review must be `accept` and bind the exact variant-set ID, variant ID, and supplied PNG SHA-256. A reviewed source identity and approved licensing alone do not approve newly supplied variant artwork.
+
+A production variant review has exactly these fields:
+
+```json
+{
+  "id": "variant-review-<content hash>",
+  "kind": "variant-review-decision",
+  "schema_version": "1.0",
+  "variant_set_ref": "variant-set-...",
+  "variant_id": "variant-...",
+  "png_sha256": "<64 lowercase hex>",
+  "decision": "accept",
+  "reviewer": "owner"
+}
+```
+
+The ID is the normal deterministic `variant-review` content identifier calculated from all fields except `id`.
 
 ## Validation boundaries
 
