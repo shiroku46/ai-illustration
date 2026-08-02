@@ -284,6 +284,8 @@ def _parse_png(data: bytes) -> PngInfo:
             if length != 1 or chunk_data[0] > 3:
                 raise ValueError("invalid sRGB chunk")
             seen_srgb = True
+        elif chunk_type == b"tRNS":
+            raise ValueError("tRNS is forbidden for alpha PNG")
         elif chunk_type == b"IDAT":
             if not seen_ihdr:
                 raise ValueError("IDAT precedes IHDR")
