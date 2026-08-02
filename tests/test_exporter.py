@@ -264,6 +264,17 @@ class ExporterTests(unittest.TestCase):
         with self.assertRaisesRegex(ExportError, "EVALUATION_REVIEW_CLAIM"):
             check_export_package(item_root / "package-manifest.json", output)
 
+        reviewer_only_package = copy.deepcopy(result["package"])
+        reviewer_only_item = reviewer_only_package["items"][0]
+        reviewer_only_item["variant_reviewer"] = "attacker"
+        reviewer_core = {key: value for key, value in reviewer_only_package.items() if key != "id"}
+        reviewer_only_package["id"] = content_identifier("variant-export-package", reviewer_core, 20)
+        reviewer_root = output / reviewer_only_package["id"]
+        shutil.copytree(old_root, reviewer_root)
+        _write_canonical(reviewer_root / "package-manifest.json", reviewer_only_package)
+        with self.assertRaisesRegex(ExportError, "EVALUATION_REVIEW_CLAIM"):
+            check_export_package(reviewer_root / "package-manifest.json", output)
+
         malicious_sidecar_package = copy.deepcopy(result["package"])
         sidecar_item = malicious_sidecar_package["items"][0]
         sidecar_path = old_root / sidecar_item["sidecar_path"]
@@ -282,6 +293,29 @@ class ExporterTests(unittest.TestCase):
         _write_canonical(sidecar_root / "package-manifest.json", malicious_sidecar_package)
         with self.assertRaisesRegex(ExportError, "EVALUATION_REVIEW_CLAIM"):
             check_export_package(sidecar_root / "package-manifest.json", output)
+
+    def test_export_check_rejects_self_consistent_wrong_index_binding(self) -> None:
+        output = self.root / "index-binding"
+        result = self._build(output, write=True)
+        old_root = output / result["package_directory"]
+
+        malicious_package = copy.deepcopy(result["package"])
+        index_path = old_root / malicious_package["paper_theater_index_path"]
+        malicious_index = json.loads(index_path.read_text(encoding="utf-8"))
+        malicious_index["entries"][0]["sha256"] = "0" * 64
+        index_core = {key: value for key, value in malicious_index.items() if key != "id"}
+        malicious_index["id"] = content_identifier("paper-theater-index", index_core, 20)
+        index_payload = canonical_json(malicious_index) + b"\n"
+        malicious_package["paper_theater_index_sha256"] = hashlib.sha256(index_payload).hexdigest()
+        package_core = {key: value for key, value in malicious_package.items() if key != "id"}
+        malicious_package["id"] = content_identifier("variant-export-package", package_core, 20)
+
+        malicious_root = output / malicious_package["id"]
+        shutil.copytree(old_root, malicious_root)
+        (malicious_root / malicious_package["paper_theater_index_path"]).write_bytes(index_payload)
+        _write_canonical(malicious_root / "package-manifest.json", malicious_package)
+        with self.assertRaisesRegex(ExportError, "INDEX_BINDING_MISMATCH"):
+            check_export_package(malicious_root / "package-manifest.json", output)
 
     def test_missing_extra_malformed_dimension_srgb_and_alpha_fail_closed(self) -> None:
         first_id = self.variant_set["variants"][0]["id"]
