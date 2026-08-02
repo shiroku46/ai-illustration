@@ -42,6 +42,7 @@
           "sidecar_path": {"type": "string", "pattern": "^variants/v1/.+\\.json$"},
           "sidecar_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "variant_review_ref": {"type": "string", "pattern": "^variant-review-[0-9a-f]{20}$"},
+          "variant_review_path": {"type": "string", "pattern": "^reviews/variant-[0-9a-f]{20}\\.json$"},
           "variant_review_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
         }
       }
@@ -54,7 +55,20 @@
         "properties": {
           "items": {
             "items": {
-              "required": ["variant_review_ref", "variant_review_sha256"]
+              "required": ["variant_review_ref", "variant_review_path", "variant_review_sha256"]
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "items": {
+            "items": {
+              "allOf": [
+                {"not": {"required": ["variant_review_ref"]}},
+                {"not": {"required": ["variant_review_path"]}},
+                {"not": {"required": ["variant_review_sha256"]}}
+              ]
             }
           }
         }
