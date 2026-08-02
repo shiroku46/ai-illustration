@@ -1,5 +1,6 @@
 {
   "candidate_ref": "candidate-demo",
+  "candidate_request_ref": "request-demo",
   "candidate_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "categories": ["fixture-only"],
   "decision": "accept",
