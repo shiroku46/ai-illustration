@@ -1,23 +1,45 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+import struct
 import tempfile
 import unittest
+import zlib
 
 from ai_illustration.variants import VariantError, plan_variant_set, validate_variant_set
-
-SHA = "a" * 64
 
 
 def _write(root: Path, name: str, data: dict[str, object]) -> None:
     (root / name).write_text(json.dumps(data), encoding="utf-8")
 
 
+def _png_bytes() -> bytes:
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + kind
+            + data
+            + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+        )
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0))
+        + chunk(b"sRGB", b"\x00")
+        + chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00\x00"))
+        + chunk(b"IEND", b"")
+    )
+
+
 class VariantTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
+        payload = _png_bytes()
+        (self.root / "candidate.png").write_bytes(payload)
+        self.sha = hashlib.sha256(payload).hexdigest()
         _write(self.root, "character.json", {
             "kind": "character-spec", "schema_version": "1.0", "id": "boke",
             "version": "v001", "role": "boke", "review_status": "approved",
@@ -38,15 +60,15 @@ class VariantTests(unittest.TestCase):
         })
         _write(self.root, "candidate.json", {
             "kind": "candidate-asset", "schema_version": "1.0", "id": "candidate-demo",
-            "request_ref": "request-demo", "path": "candidate.png", "sha256": SHA,
-            "width": 1024, "height": 2048, "color_space": "sRGB", "has_alpha": True,
+            "request_ref": "request-demo", "path": "candidate.png", "sha256": self.sha,
+            "width": 1, "height": 1, "color_space": "sRGB", "has_alpha": True,
             "media_type": "image/png", "status": "technically_valid",
             "provenance": {"source": "fixture"},
         })
         _write(self.root, "review.json", {
             "kind": "review-decision", "schema_version": "1.0", "id": "review-demo",
             "candidate_ref": "candidate-demo", "candidate_request_ref": "request-demo",
-            "candidate_sha256": SHA, "decision": "accept", "reviewer": "owner",
+            "candidate_sha256": self.sha, "decision": "accept", "reviewer": "owner",
             "timestamp": "2026-08-02T00:00:00Z", "categories": [],
         })
         self.matrix = {
@@ -80,6 +102,14 @@ class VariantTests(unittest.TestCase):
         with self.assertRaisesRegex(VariantError, "STALE_REVIEW"):
             plan_variant_set(self.root, "candidate-demo", self.matrix, "evaluation")
 
+    def test_source_bytes_are_required_and_verified(self) -> None:
+        (self.root / "candidate.png").unlink()
+        with self.assertRaisesRegex(VariantError, "ASSET_MISSING"):
+            plan_variant_set(self.root, "candidate-demo", self.matrix, "evaluation")
+        (self.root / "candidate.png").write_bytes(b"tampered")
+        with self.assertRaisesRegex(VariantError, "ASSET_CHECKSUM_MISMATCH"):
+            plan_variant_set(self.root, "candidate-demo", self.matrix, "evaluation")
+
     def test_evaluation_does_not_imply_commercial_approval(self) -> None:
         request = json.loads((self.root / "request.json").read_text(encoding="utf-8"))
         request["license_status"] = "reviewing"
@@ -95,7 +125,7 @@ class VariantTests(unittest.TestCase):
         _write(self.root, "review-later.json", {
             "kind": "review-decision", "schema_version": "1.0", "id": "review-later",
             "candidate_ref": "candidate-demo", "candidate_request_ref": "request-demo",
-            "candidate_sha256": SHA, "decision": "reject", "reviewer": "owner",
+            "candidate_sha256": self.sha, "decision": "reject", "reviewer": "owner",
             "timestamp": "2026-08-03T00:00:00Z", "categories": [],
         })
         with self.assertRaisesRegex(VariantError, "ACCEPT_REVIEW_REQUIRED"):
