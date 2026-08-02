@@ -88,6 +88,15 @@ class ReviewUITest(unittest.TestCase):
         self.assertTrue(candidate.payload["image_available"])
         self.assertEqual(candidate.read_verified_asset(), payload)
 
+    def test_character_reference_version_must_match(self) -> None:
+        self.seed()
+        request_path = self.manifests / "request.json"
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+        request["character_ref"] = "boke@v002"
+        request_path.write_text(json.dumps(request), encoding="utf-8")
+        with self.assertRaisesRegex(ReviewUIError, "mismatched character version"):
+            load_review_data(self.manifests, self.assets)
+
     def test_manifest_file_symlink_is_rejected_even_when_target_is_valid(self) -> None:
         self.seed()
         outside = self.root / "outside.json"
@@ -111,22 +120,39 @@ class ReviewUITest(unittest.TestCase):
         self.assertEqual(review["categories"], ["generic_eyes", "line_uniformity"])
         self.assertEqual(validate_document(Manifest(Path("review.json"), review)), [])
 
-    def test_non_reviewable_candidate_cannot_be_approved(self) -> None:
+    def test_approval_requires_reviewable_status_and_verified_image(self) -> None:
         self.seed()
-        candidate = load_review_data(self.manifests, self.assets).candidates[0].payload
-        self.assertEqual(candidate["candidate_status"], "received")
+        received = load_review_data(self.manifests, self.assets).candidates[0].payload
         for decision in ("accept", "shortlist"):
-            with self.subTest(decision=decision):
-                with self.assertRaisesRegex(ReviewUIError, "technically_valid"):
+            with self.subTest(status="received", decision=decision):
+                with self.assertRaisesRegex(ReviewUIError, "verified image"):
                     make_review_decision(
-                        candidate, decision=decision, reviewer="owner", categories=[],
+                        received, decision=decision, reviewer="owner", categories=[],
                         timestamp="2026-08-02T11:00:00Z",
                     )
         rejected = make_review_decision(
-            candidate, decision="reject", reviewer="owner", categories=["other"],
+            received, decision="reject", reviewer="owner", categories=["other"],
             timestamp="2026-08-02T11:00:00Z",
         )
         self.assertEqual(rejected["decision"], "reject")
+
+        for path in self.manifests.glob("*.json"):
+            path.unlink()
+        verified_bytes = self.seed(with_image=True)
+        verified = load_review_data(self.manifests, self.assets).candidates[0].payload
+        self.assertTrue(verified_bytes)
+        accepted = make_review_decision(
+            verified, decision="accept", reviewer="owner", categories=[],
+            timestamp="2026-08-02T11:00:01Z",
+        )
+        self.assertEqual(accepted["decision"], "accept")
+        unavailable = dict(verified)
+        unavailable["image_available"] = False
+        with self.assertRaisesRegex(ReviewUIError, "verified image"):
+            make_review_decision(
+                unavailable, decision="shortlist", reviewer="owner", categories=[],
+                timestamp="2026-08-02T11:00:02Z",
+            )
 
     def test_imported_review_must_bind_current_request_and_checksum(self) -> None:
         self.seed()
@@ -191,6 +217,7 @@ class ReviewUITest(unittest.TestCase):
             script_body = script.read()
             self.assertEqual(script.status, 200)
             self.assertIn(b"APPROVAL_DECISIONS", script_body)
+            self.assertIn(b"image_available", script_body)
             self.assertIn(b"technically_valid", script_body)
             connection.request("HEAD", "/")
             head = connection.getresponse()
