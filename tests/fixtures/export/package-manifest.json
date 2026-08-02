@@ -1,0 +1,34 @@
+{
+  "character_ref": "boke@v001",
+  "id": "variant-export-package-c8a0e853a4f23fab0610",
+  "intent": "evaluation",
+  "items": [
+    {
+      "paper_theater_key": "boke.boke.smile.talking.front.full",
+      "png_path": "variants/v1/boke/full/front/talking-smile/variant-065de3c2d114fbdcd8ee.png",
+      "png_sha256": "240621cf7524d21b5379f69bfe6c98cebe1a25838ce46d32bcd5d8b8fabdc091",
+      "sidecar_path": "variants/v1/boke/full/front/talking-smile/variant-065de3c2d114fbdcd8ee.json",
+      "sidecar_sha256": "8db8d0f9c64dda193aeea8cc01819b952e4914258b33058cc2c9733508580821",
+      "variant_id": "variant-065de3c2d114fbdcd8ee"
+    },
+    {
+      "paper_theater_key": "boke.boke.neutral.listening.front.full.closed",
+      "png_path": "variants/v1/boke/full/front/listening-neutral-closed/variant-bad0407a3784746a895f.png",
+      "png_sha256": "1d644375a84ba8f6e77ef1826ba2589d0f7ebca6980235c2e4827ccdfdb8448b",
+      "sidecar_path": "variants/v1/boke/full/front/listening-neutral-closed/variant-bad0407a3784746a895f.json",
+      "sidecar_sha256": "9d7d7f9576a3f378f44dd106fd07574ed29231594d011d2c18bac362155520af",
+      "variant_id": "variant-bad0407a3784746a895f"
+    }
+  ],
+  "kind": "variant-export-package",
+  "license_status": "approved",
+  "paper_theater_index_path": "paper-theater-index.json",
+  "paper_theater_index_sha256": "f84e69cebd813de2286eb9c5da0997490e87fc3db6439fb8d95584f43da7649c",
+  "review_ref": "review-demo",
+  "schema_version": "1.0",
+  "source_candidate_ref": "candidate-demo",
+  "source_candidate_sha256": "31e567633479d71554c5f5b00c7d831aeece9bde5b581216a37ccce20c3f2f66",
+  "source_request_ref": "request-demo",
+  "style_ref": "rough-flat@v001",
+  "variant_set_ref": "variant-set-5a90df4c3ba46c88ff45"
+}
