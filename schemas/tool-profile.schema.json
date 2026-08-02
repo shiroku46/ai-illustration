@@ -34,9 +34,10 @@
       "then": {
         "properties": {
           "license_evidence_state": {"const": "approved"},
-          "commercial_use_review_state": {"const": "approved"}
+          "commercial_use_review_state": {"const": "approved"},
+          "evidence_references": {"minItems": 1}
         },
-        "required": ["license_evidence_state", "commercial_use_review_state"]
+        "required": ["license_evidence_state", "commercial_use_review_state", "evidence_references"]
       }
     }
   ]
