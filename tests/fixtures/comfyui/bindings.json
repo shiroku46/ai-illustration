@@ -1,0 +1,22 @@
+{
+  "model": {
+    "node_id": "1",
+    "input": "ckpt_name",
+    "source": "model_id"
+  },
+  "output": {
+    "node_id": "3",
+    "input": "filename_prefix",
+    "source": "output_intent"
+  },
+  "seed": {
+    "node_id": "2",
+    "input": "seed",
+    "source": "seed"
+  },
+  "steps": {
+    "node_id": "2",
+    "input": "steps",
+    "source": "config.steps"
+  }
+}

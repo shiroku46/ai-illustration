@@ -1,0 +1,23 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "unresolved-model"
+    }
+  },
+  "2": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["1", 0],
+      "seed": 0,
+      "steps": 20
+    }
+  },
+  "3": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "dry-run",
+      "images": ["2", 0]
+    }
+  }
+}
