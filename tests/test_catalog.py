@@ -17,6 +17,7 @@ from ai_illustration.catalog import (
     validate_tool_profile,
 )
 
+ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "catalog"
 
 
@@ -67,6 +68,13 @@ class CatalogTests(unittest.TestCase):
         codes = {item.code for item in diagnostics}
         self.assertIn("APPROVAL_WITHOUT_LICENSE", codes)
         self.assertIn("APPROVAL_WITHOUT_COMMERCIAL_REVIEW", codes)
+
+    def test_published_schema_enforces_approval_prerequisites(self) -> None:
+        schema = json.loads((ROOT / "schemas" / "tool-profile.schema.json").read_text(encoding="utf-8"))
+        conditional = schema["allOf"][0]
+        self.assertEqual("approved", conditional["if"]["properties"]["decision_state"]["const"])
+        self.assertEqual("approved", conditional["then"]["properties"]["license_evidence_state"]["const"])
+        self.assertEqual("approved", conditional["then"]["properties"]["commercial_use_review_state"]["const"])
 
     def test_rejects_contradictory_or_unknown_fields(self) -> None:
         tool = copy.deepcopy(self.tool)
