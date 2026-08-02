@@ -1,0 +1,28 @@
+{
+  "audit": {
+    "alternative_connected_paths": "trusted-checks.yml:active:325412905;ci-reconcile.yml:active:325412899;supervisor.yml:active:325412904;claude-queue.yml:active:325412902",
+    "changed_and_renamed_paths": "[\"README.md\",\"pyproject.toml\",\"schemas/candidate-asset.schema.json\",\"schemas/character-spec.schema.json\",\"schemas/export-manifest.schema.json\",\"schemas/generation-request.schema.json\",\"schemas/review-decision.schema.json\",\"schemas/style-profile.schema.json\",\"src/ai_illustration/__init__.py\",\"src/ai_illustration/cli.py\",\"src/ai_illustration/models.py\",\"src/ai_illustration/naming.py\",\"src/ai_illustration/validation.py\",\"tests/fixtures/invalid/README.md\",\"tests/fixtures/valid/candidate-asset.json\",\"tests/fixtures/valid/character-spec.json\",\"tests/fixtures/valid/export-manifest.json\",\"tests/fixtures/valid/generation-request.json\",\"tests/fixtures/valid/review-decision.json\",\"tests/fixtures/valid/style-profile.json\",\"tests/test_models.py\",\"tests/test_naming.py\",\"tests/test_validation.py\"]",
+    "check_evidence": "[{\"app\":\"github-actions\",\"conclusion\":\"success\",\"name\":\"test\",\"status\":\"completed\"},{\"app\":\"github-actions\",\"conclusion\":\"success\",\"name\":\"validate\",\"status\":\"completed\"}]",
+    "exact_head_sha": "9c63782e16c731fc0d222957fb0d01b076b2f221",
+    "human_only_connected_evidence": "not-applicable",
+    "idempotency": "automation-stops/pr-6/9c63782e16c731fc0d222957fb0d01b076b2f221/BLOCKING_CODEX_REVIEW.json",
+    "issue": "#5",
+    "mergeability": "mergeable=True,mergeable_state=clean",
+    "native_pull_request_workflow_evidence": "{\"clean\":true,\"runs\":[{\"conclusion\":\"success\",\"display_name\":\"CI\",\"run_id\":30743156280,\"status\":\"completed\",\"updated_at\":\"2026-08-02T10:08:43Z\",\"workflow\":\"ci.yml\",\"workflow_id\":325165152},{\"conclusion\":\"success\",\"display_name\":\"Unit Tests\",\"run_id\":30743156278,\"status\":\"completed\",\"updated_at\":\"2026-08-02T10:08:47Z\",\"workflow\":\"unit-tests.yml\",\"workflow_id\":325165153}]}",
+    "permissions_and_credentials": "automation_owner_permission=admin,secret_values_not_requested=true",
+    "pull_request": "#6",
+    "reason_code": "BLOCKING_CODEX_REVIEW",
+    "repository_metadata": "visibility=public,default_branch=main,initial_and_final_head_confirmed=true",
+    "review_and_provenance": "codex=blocking,codex_timestamp=2026-08-02T10:12:17Z,trusted_request_timestamp=None,unresolved_threads=True",
+    "scope_and_authorization": "issue=state=open,trusted_author=True,authorization=all_paths=True,protected_paths=True",
+    "workflow_run_and_job_evidence": "[{\"active\":false,\"complete\":true,\"run_id\":30743176913,\"success\":true,\"updated_at\":\"2026-08-02T10:09:32Z\"}]"
+  },
+  "detail": "Exact-head Codex evidence contains a blocking finding or unresolved review thread.",
+  "exact_head_sha": "9c63782e16c731fc0d222957fb0d01b076b2f221",
+  "issue_number": 5,
+  "notification": false,
+  "pull_request_number": 6,
+  "reason_code": "BLOCKING_CODEX_REVIEW",
+  "required_human_action": null,
+  "schema_version": 1
+}
