@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,7 @@ from unittest.mock import patch
 import zlib
 
 from ai_illustration.exporter import ExportError, build_export_package, check_export_package
+from ai_illustration.naming import content_identifier
 from ai_illustration.variants import plan_variant_set
 
 
@@ -47,12 +49,14 @@ class ExporterTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.manifests = self.root / "manifests"
         self.sources = self.root / "sources"
+        self.approvals = self.root / "approvals"
         self.output = self.root / "output"
         self.manifests.mkdir()
         self.sources.mkdir()
+        self.approvals.mkdir()
 
         candidate_payload = _png((0, 0, 0, 0))
-        candidate_sha = __import__("hashlib").sha256(candidate_payload).hexdigest()
+        candidate_sha = hashlib.sha256(candidate_payload).hexdigest()
         (self.manifests / "candidate.png").write_bytes(candidate_payload)
         _write_json(self.manifests / "character.json", {
             "kind": "character-spec", "schema_version": "1.0", "id": "boke",
@@ -85,13 +89,13 @@ class ExporterTests(unittest.TestCase):
             "candidate_sha256": candidate_sha, "decision": "accept", "reviewer": "owner",
             "timestamp": "2026-08-02T00:00:00Z", "categories": [],
         })
-        matrix = {
+        self.matrix = {
             "combinations": [
                 {"expression": "smile", "pose": "talking", "facing": "front", "crop": "full"},
                 {"expression": "neutral", "pose": "listening", "facing": "front", "crop": "full", "mouth_state": "closed"},
             ]
         }
-        self.variant_set = plan_variant_set(self.manifests, "candidate-demo", matrix, "evaluation")
+        self.variant_set = plan_variant_set(self.manifests, "candidate-demo", self.matrix, "evaluation")
         self.variant_set_path = self.root / "variant-set.json"
         _write_json(self.variant_set_path, self.variant_set)
         self._restore_sources()
@@ -99,25 +103,58 @@ class ExporterTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def _restore_sources(self) -> None:
-        for child in list(self.sources.iterdir()):
+    def _clear(self, directory: Path) -> None:
+        for child in list(directory.iterdir()):
             if child.is_dir() and not child.is_symlink():
                 import shutil
                 shutil.rmtree(child)
             else:
                 child.unlink()
+
+    def _restore_sources(self) -> None:
+        self._clear(self.sources)
         for variant in self.variant_set["variants"]:
             pixel = (255, 0, 0, 255) if variant["expression"] == "neutral" else (0, 0, 255, 255)
             (self.sources / f"{variant['id']}.png").write_bytes(_png(pixel))
 
-    def _build(self, output: Path | None = None, *, write: bool = False) -> dict[str, object]:
+    def _build(
+        self,
+        output: Path | None = None,
+        *,
+        write: bool = False,
+        variant_set_path: Path | None = None,
+        approval_root: Path | None = None,
+    ) -> dict[str, object]:
         return build_export_package(
-            self.variant_set_path,
+            variant_set_path or self.variant_set_path,
             self.manifests,
             self.sources,
             output or self.output,
+            approval_root=approval_root,
             write=write,
         )
+
+    def _production_variant_set(self) -> tuple[dict[str, object], Path]:
+        production = plan_variant_set(self.manifests, "candidate-demo", self.matrix, "production")
+        path = self.root / "variant-set-production.json"
+        _write_json(path, production)
+        return production, path
+
+    def _write_approvals(self, variant_set: dict[str, object]) -> None:
+        self._clear(self.approvals)
+        for variant in variant_set["variants"]:
+            png_path = self.sources / f"{variant['id']}.png"
+            core = {
+                "kind": "variant-review-decision",
+                "schema_version": "1.0",
+                "variant_set_ref": variant_set["id"],
+                "variant_id": variant["id"],
+                "png_sha256": hashlib.sha256(png_path.read_bytes()).hexdigest(),
+                "decision": "accept",
+                "reviewer": "owner",
+            }
+            review = {"id": content_identifier("variant-review", core, 20), **core}
+            _write_json(self.approvals / f"{variant['id']}.json", review)
 
     def test_deterministic_dry_run_matches_fixtures_and_does_not_write(self) -> None:
         first = self._build()
@@ -146,6 +183,38 @@ class ExporterTests(unittest.TestCase):
         repeated = self._build(write=True)
         self.assertTrue(repeated["idempotent"])
         self.assertFalse(repeated["published"])
+
+    def test_production_requires_exact_byte_bound_variant_accept_reviews(self) -> None:
+        production, production_path = self._production_variant_set()
+        with self.assertRaisesRegex(ExportError, "PRODUCTION_VARIANT_REVIEW_REQUIRED"):
+            self._build(variant_set_path=production_path)
+        self._write_approvals(production)
+        result = self._build(variant_set_path=production_path, approval_root=self.approvals)
+        self.assertEqual(result["package"]["intent"], "production")
+        self.assertTrue(all("variant_review_ref" in item for item in result["package"]["items"]))
+
+        first = production["variants"][0]
+        review_path = self.approvals / f"{first['id']}.json"
+        review = json.loads(review_path.read_text(encoding="utf-8"))
+        review["png_sha256"] = "0" * 64
+        review_core = {key: value for key, value in review.items() if key != "id"}
+        review["id"] = content_identifier("variant-review", review_core, 20)
+        _write_json(review_path, review)
+        with self.assertRaisesRegex(ExportError, "VARIANT_REVIEW_CHECKSUM"):
+            self._build(variant_set_path=production_path, approval_root=self.approvals)
+
+        self._write_approvals(production)
+        review = json.loads(review_path.read_text(encoding="utf-8"))
+        review["decision"] = "reject"
+        review_core = {key: value for key, value in review.items() if key != "id"}
+        review["id"] = content_identifier("variant-review", review_core, 20)
+        _write_json(review_path, review)
+        with self.assertRaisesRegex(ExportError, "VARIANT_REVIEW_NOT_ACCEPTED"):
+            self._build(variant_set_path=production_path, approval_root=self.approvals)
+
+    def test_evaluation_rejects_ambiguous_approval_root(self) -> None:
+        with self.assertRaisesRegex(ExportError, "APPROVAL_ROOT_NOT_ALLOWED"):
+            self._build(approval_root=self.approvals)
 
     def test_missing_extra_malformed_dimension_srgb_and_alpha_fail_closed(self) -> None:
         first_id = self.variant_set["variants"][0]["id"]
@@ -176,10 +245,11 @@ class ExporterTests(unittest.TestCase):
             self._build()
 
     def test_roots_symlinks_and_defensive_duplicate_or_unsafe_plans_fail(self) -> None:
-        with self.assertRaisesRegex(ExportError, "ROOT_OVERLAP"):
-            build_export_package(
-                self.variant_set_path, self.manifests, self.sources, self.sources / "out", write=False
-            )
+        for unsafe_output in (self.sources / "out", self.manifests / "out"):
+            with self.assertRaisesRegex(ExportError, "ROOT_OVERLAP"):
+                build_export_package(
+                    self.variant_set_path, self.manifests, self.sources, unsafe_output, write=False
+                )
         if hasattr(os, "symlink"):
             outside = self.root / "outside.png"
             outside.write_bytes(_png((1, 2, 3, 255)))
