@@ -1,1 +1,23 @@
-{"candidate_ref":"candidate-demo","character_ref":"boke@v001","color_space":"sRGB","crop":"full","expression":"neutral","facing":"front","format":"png","has_alpha":true,"height":2048,"id":"export-demo","kind":"export-manifest","license_status":"approved","path":"exports/v1/boke/full/front/standing-neutral-neutral/boke__full__front__standing-neutral__neutral__v001__aaaaaaaaaaaa.png","pose":"standing-neutral","review_ref":"review-demo","schema_version":"1.0","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sidecar_path":"exports/v1/boke/full/front/standing-neutral-neutral/boke__full__front__standing-neutral__neutral__v001__aaaaaaaaaaaa.json","status":"validated","version":"v001","width":2048}
+{
+  "candidate_ref": "candidate-demo",
+  "character_ref": "boke@v001",
+  "color_space": "sRGB",
+  "crop": "full",
+  "expression": "neutral",
+  "facing": "front",
+  "format": "png",
+  "has_alpha": true,
+  "height": 2048,
+  "id": "export-demo",
+  "kind": "export-manifest",
+  "license_status": "approved",
+  "path": "exports/v1/boke/full/front/standing-neutral-neutral/boke__full__front__standing-neutral__neutral__v001__aaaaaaaaaaaa.png",
+  "pose": "standing-neutral",
+  "review_ref": "review-demo",
+  "schema_version": "1.0",
+  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "sidecar_path": "exports/v1/boke/full/front/standing-neutral-neutral/boke__full__front__standing-neutral__neutral__v001__aaaaaaaaaaaa.json",
+  "status": "planned",
+  "version": "v001",
+  "width": 2048
+}

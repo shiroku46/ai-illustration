@@ -1,1 +1,15 @@
-{"color_space":"sRGB","has_alpha":true,"height":2048,"id":"candidate-demo","kind":"candidate-asset","media_type":"image/png","path":"tests/fixtures/synthetic/candidate-demo.png","provenance":{"source":"synthetic-fixture"},"request_ref":"request-demo","schema_version":"1.0","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"technically_valid","width":2048}
+{
+  "color_space": "sRGB",
+  "has_alpha": true,
+  "height": 2048,
+  "id": "candidate-demo",
+  "kind": "candidate-asset",
+  "media_type": "image/png",
+  "path": "tests/fixtures/synthetic/candidate-demo.png",
+  "provenance": {"source": "synthetic-fixture"},
+  "request_ref": "request-demo",
+  "schema_version": "1.0",
+  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "status": "received",
+  "width": 2048
+}

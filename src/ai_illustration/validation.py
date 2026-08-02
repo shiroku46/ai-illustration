@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable
-import json, re
+import hashlib, json, re
 from .models import Diagnostic, Manifest, load_manifest
 from .naming import SHA256_RE, TOKEN_RE, VERSION_RE, export_paths, safe_relative_path
 
@@ -98,8 +98,30 @@ def load_path(path:Path)->tuple[list[Manifest],list[Diagnostic]]:
   except (OSError,UnicodeError,json.JSONDecodeError,ValueError) as e:errors.append(Diagnostic("LOAD_ERROR",str(e),str(item)))
  return docs,errors
 
-def validate_set(manifests:Iterable[Manifest])->list[Diagnostic]:
- docs=list(manifests); out:list[Diagnostic]=[]; index:dict[tuple[str,str],Manifest]={}; duplicate:dict[str,list[Manifest]]=defaultdict(list)
+def _verify_png(m:Manifest,field:str,root:Path)->list[Diagnostic]:
+ d=m.data; out:list[Diagnostic]=[]
+ try:rel=safe_relative_path(d.get(field,""))
+ except (TypeError,ValueError) as e:return [_d(m,"UNSAFE_PATH",str(e),field)]
+ path=root.joinpath(*rel.parts)
+ if not path.is_file():
+  alternate=Path.cwd().joinpath(*rel.parts)
+  if alternate.is_file():path=alternate
+ if not path.is_file():return [_d(m,"ASSET_MISSING",f"asset file not found: {rel}",field)]
+ try:data=path.read_bytes()
+ except OSError as e:return [_d(m,"ASSET_READ_ERROR",str(e),field)]
+ if path.suffix.lower()!=".png" or not data.startswith(b"\x89PNG\r\n\x1a\n"):
+  out.append(_d(m,"ASSET_NOT_PNG","asset must be a PNG file",field)); return out
+ actual=hashlib.sha256(data).hexdigest()
+ if actual!=d.get("sha256"):out.append(_d(m,"ASSET_CHECKSUM_MISMATCH",f"actual SHA-256 is {actual}","sha256"))
+ if len(data)<26 or data[12:16]!=b"IHDR":out.append(_d(m,"PNG_HEADER","PNG IHDR is missing",field)); return out
+ width=int.from_bytes(data[16:20],"big"); height=int.from_bytes(data[20:24],"big"); alpha=data[25] in {4,6}
+ if width!=d.get("width") or height!=d.get("height"):out.append(_d(m,"ASSET_DIMENSION_MISMATCH",f"actual dimensions are {width}x{height}",field))
+ if alpha!=(d.get("has_alpha") is True):out.append(_d(m,"ASSET_ALPHA_MISMATCH","PNG alpha capability differs from manifest",field))
+ if d.get("color_space")=="sRGB" and b"sRGB" not in data:out.append(_d(m,"ASSET_COLOR_SPACE_UNVERIFIED","PNG lacks an sRGB chunk",field))
+ return out
+
+def validate_set(manifests:Iterable[Manifest],root:Path|None=None)->list[Diagnostic]:
+ root=(root or Path.cwd()).resolve(); docs=list(manifests); out:list[Diagnostic]=[]; index:dict[tuple[str,str],Manifest]={}; duplicate:dict[str,list[Manifest]]=defaultdict(list)
  for m in docs:
   out.extend(validate_document(m)); duplicate[m.manifest_id].append(m)
   if m.kind and m.manifest_id:index[(m.kind,m.manifest_id)]=m
@@ -118,7 +140,9 @@ def validate_set(manifests:Iterable[Manifest])->list[Diagnostic]:
     if isinstance(v,str) and REF_RE.fullmatch(v):
      ident,version=_ref(v); target=need(k,ident,m,f)
      if target and target.data.get("version")!=version:out.append(_d(m,"VERSION_MISMATCH",f"{f} version does not match target",f))
-  elif m.kind=="candidate-asset" and isinstance(d.get("request_ref"),str):need("generation-request",d["request_ref"],m,"request_ref")
+  elif m.kind=="candidate-asset":
+   if isinstance(d.get("request_ref"),str):need("generation-request",d["request_ref"],m,"request_ref")
+   if d.get("status")=="technically_valid":out.extend(_verify_png(m,"path",root))
   elif m.kind=="review-decision":
    candidate=need("candidate-asset",d.get("candidate_ref",""),m,"candidate_ref")
    if candidate:
@@ -128,16 +152,18 @@ def validate_set(manifests:Iterable[Manifest])->list[Diagnostic]:
   elif m.kind=="export-manifest":
    candidate=need("candidate-asset",d.get("candidate_ref",""),m,"candidate_ref"); review=need("review-decision",d.get("review_ref",""),m,"review_ref"); request=None
    if candidate and isinstance(candidate.data.get("request_ref"),str):request=need("generation-request",candidate.data["request_ref"],m,"candidate_ref")
-   if review and review.data.get("decision")!="accept":out.append(_d(m,"NOT_APPROVED","export review must be accept","review_ref"))
+   production=d.get("status") in {"validated","packaged","verified"}
+   if production and review and review.data.get("decision")!="accept":out.append(_d(m,"NOT_APPROVED","production export review must be accept","review_ref"))
    if review and review.data.get("candidate_ref")!=d.get("candidate_ref"):out.append(_d(m,"REFERENCE_MISMATCH","review does not approve this candidate","review_ref"))
    if candidate:
     for f in ("sha256","width","height","color_space","has_alpha"):
      if candidate.data.get(f)!=d.get(f):out.append(_d(m,"EXPORT_MISMATCH",f"{f} differs from candidate",f))
-    if candidate.data.get("status")!="technically_valid":out.append(_d(m,"NOT_REVIEW_READY","candidate is not technically_valid","candidate_ref"))
+    if production and candidate.data.get("status")!="technically_valid":out.append(_d(m,"NOT_REVIEW_READY","candidate is not technically_valid","candidate_ref"))
    if review and candidate:
     if review.data.get("candidate_request_ref")!=candidate.data.get("request_ref"):out.append(_d(m,"REVIEW_SOURCE_MISMATCH","review request must match candidate source request","review_ref"))
     sha=review.data.get("candidate_sha256")
     if sha!=candidate.data.get("sha256") or sha!=d.get("sha256"):out.append(_d(m,"REVIEW_CHECKSUM_MISMATCH","review checksum must match candidate and export","review_ref"))
+   if production:out.extend(_verify_png(m,"path",root))
    if request:
     for f in ("character_ref","pose","expression","crop","facing"):
      if request.data.get(f)!=d.get(f):out.append(_d(m,"SOURCE_METADATA_MISMATCH",f"{f} differs from source request",f))
@@ -150,4 +176,4 @@ def validate_set(manifests:Iterable[Manifest])->list[Diagnostic]:
  return out
 
 def validate_path(path:Path)->list[Diagnostic]:
- docs,errors=load_path(path); errors.extend(validate_set(docs)); return errors
+ docs,errors=load_path(path); root=path if path.is_dir() else path.parent; errors.extend(validate_set(docs,root)); return errors
