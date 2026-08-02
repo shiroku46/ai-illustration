@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "variant-set",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id", "kind", "schema_version", "intent", "source_candidate_ref",
+    "source_request_ref", "source_candidate_sha256", "review_ref", "character_ref",
+    "style_ref", "role", "tool_id", "model_id", "license_status", "stage_side",
+    "canvas", "editable_source_format", "layer_strategy", "mouth_shape_granularity",
+    "variants"
+  ],
+  "properties": {
+    "id": {"type": "string", "pattern": "^variant-set-[0-9a-f]{20}$"},
+    "kind": {"const": "variant-set"},
+    "schema_version": {"const": "1.0"},
+    "intent": {"enum": ["evaluation", "production"]},
+    "source_candidate_ref": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "source_request_ref": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "source_candidate_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "review_ref": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "character_ref": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*@v[0-9]{3}$"},
+    "style_ref": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*@v[0-9]{3}$"},
+    "role": {"enum": ["boke", "tsukkomi"]},
+    "tool_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "model_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "license_status": {"enum": ["unreviewed", "reviewing", "approved", "rejected"]},
+    "stage_side": {"type": ["string", "null"], "enum": ["left", "right", null]},
+    "canvas": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height"],
+          "properties": {
+            "width": {"type": "integer", "minimum": 1},
+            "height": {"type": "integer", "minimum": 1}
+          }
+        }
+      ]
+    },
+    "editable_source_format": {"type": ["string", "null"], "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "layer_strategy": {"type": ["string", "null"], "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "mouth_shape_granularity": {"type": ["string", "null"], "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "variants": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "expression", "pose", "facing", "crop", "path", "sidecar_path",
+          "paper_theater_key", "format", "media_type", "color_space", "has_alpha",
+          "width", "height"
+        ],
+        "properties": {
+          "id": {"type": "string", "pattern": "^variant-[0-9a-f]{20}$"},
+          "expression": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+          "pose": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+          "facing": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+          "crop": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+          "mouth_state": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+          "path": {"type": "string", "pattern": "^variants/v1/.+\\.png$"},
+          "sidecar_path": {"type": "string", "pattern": "^variants/v1/.+\\.json$"},
+          "paper_theater_key": {"type": "string", "pattern": "^[a-z0-9.-]+$"},
+          "format": {"const": "png"},
+          "media_type": {"const": "image/png"},
+          "color_space": {"const": "sRGB"},
+          "has_alpha": {"const": true},
+          "width": {"type": "integer", "minimum": 1},
+          "height": {"type": "integer", "minimum": 1}
+        }
+      }
+    }
+  }
+}

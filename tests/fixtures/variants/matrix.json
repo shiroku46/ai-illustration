@@ -1,0 +1,17 @@
+{
+  "combinations": [
+    {
+      "crop": "full",
+      "expression": "smile",
+      "facing": "front",
+      "pose": "talking"
+    },
+    {
+      "crop": "full",
+      "expression": "neutral",
+      "facing": "front",
+      "mouth_state": "closed",
+      "pose": "listening"
+    }
+  ]
+}
