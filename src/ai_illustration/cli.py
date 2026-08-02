@@ -1,4 +1,4 @@
-"""Command-line interface for local manifest and tool-catalog validation."""
+"""Command-line interface for manifests, catalogs, and dry-run adapters."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import sys
 
+from .adapters import AdapterError, ComfyUIAdapter, load_json_object
 from .catalog import catalog_listing, evaluate_compatibility, load_catalog, validate_hardware_profile
 from .models import load_manifest
 from .validation import validate_path
@@ -24,6 +25,13 @@ def build_parser() -> argparse.ArgumentParser:
     catalog_compat = subparsers.add_parser("catalog-compat", help="compare tool profiles with one hardware profile")
     catalog_compat.add_argument("catalog", type=Path)
     catalog_compat.add_argument("hardware", type=Path)
+    adapter_check = subparsers.add_parser("adapter-check", help="validate a ComfyUI API-format workflow without execution")
+    adapter_check.add_argument("workflow", type=Path)
+    adapter_plan = subparsers.add_parser("adapter-plan", help="create a deterministic ComfyUI dry-run execution plan")
+    adapter_plan.add_argument("request", type=Path)
+    adapter_plan.add_argument("workflow", type=Path)
+    adapter_plan.add_argument("--bindings", type=Path)
+    adapter_plan.add_argument("--endpoint", default="http://127.0.0.1:8188")
     return parser
 
 
@@ -31,6 +39,10 @@ def _emit(payload: dict[str, object], summary: str, ok: bool) -> int:
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     print(summary, file=sys.stderr)
     return 0 if ok else 1
+
+
+def _adapter_error(exc: AdapterError) -> int:
+    return _emit({"ok": False, "diagnostics": [exc.to_dict()]}, f"adapter validation failed: {exc.code}", False)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -42,6 +54,21 @@ def main(argv: list[str] | None = None) -> int:
             "validation succeeded" if not diagnostics else f"validation failed with {len(diagnostics)} diagnostic(s)",
             not diagnostics,
         )
+
+    if args.command in {"adapter-check", "adapter-plan"}:
+        adapter = ComfyUIAdapter()
+        try:
+            workflow = load_json_object(args.workflow)
+            if args.command == "adapter-check":
+                summary = adapter.check_workflow(workflow)
+                return _emit({"ok": True, "adapter_id": adapter.adapter_id, "workflow": summary}, "adapter workflow validation succeeded", True)
+            request = load_json_object(args.request)
+            bindings_path = args.bindings or args.workflow.with_name("bindings.json")
+            bindings = load_json_object(bindings_path)
+            plan = adapter.plan(request, workflow, bindings, endpoint=args.endpoint)
+            return _emit({"ok": True, "plan": plan.to_dict()}, "adapter dry-run plan created", True)
+        except AdapterError as exc:
+            return _adapter_error(exc)
 
     catalog_path = args.path if args.command != "catalog-compat" else args.catalog
     profiles, diagnostics = load_catalog(catalog_path)
