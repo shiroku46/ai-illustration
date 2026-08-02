@@ -39,6 +39,8 @@ class ComfyUIAdapterTests(unittest.TestCase):
         unsafe = [
             "https://localhost:8188",
             "http://example.com:8188",
+            "http://127.0.0.2:8188",
+            "http://[::ffff:127.0.0.1]:8188",
             "http://user:pass@localhost:8188",
             "http://localhost:8188?token=x",
             "http://localhost:8188/#fragment",
