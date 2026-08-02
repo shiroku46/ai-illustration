@@ -52,6 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
     variant_export.add_argument("--manifest-root", type=Path, required=True)
     variant_export.add_argument("--source-root", type=Path, required=True)
     variant_export.add_argument("--output-root", type=Path, required=True)
+    variant_export.add_argument(
+        "--approval-root",
+        type=Path,
+        help="production only: one canonical byte-bound accept review JSON per variant ID",
+    )
     variant_export.add_argument("--write", action="store_true")
     export_check = subparsers.add_parser("export-check", help="verify a materialized variant export package")
     export_check.add_argument("package_manifest", type=Path)
@@ -104,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.manifest_root,
                     args.source_root,
                     args.output_root,
+                    approval_root=args.approval_root,
                     write=args.write,
                 )
                 action = "materialized" if args.write else "planned"
