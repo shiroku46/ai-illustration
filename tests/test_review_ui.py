@@ -120,38 +120,46 @@ class ReviewUITest(unittest.TestCase):
         self.assertEqual(review["categories"], ["generic_eyes", "line_uniformity"])
         self.assertEqual(validate_document(Manifest(Path("review.json"), review)), [])
 
-    def test_approval_requires_reviewable_status_and_verified_image(self) -> None:
+    def test_approval_requires_live_verified_checksum(self) -> None:
         self.seed()
         received = load_review_data(self.manifests, self.assets).candidates[0].payload
         for decision in ("accept", "shortlist"):
             with self.subTest(status="received", decision=decision):
-                with self.assertRaisesRegex(ReviewUIError, "verified image"):
+                with self.assertRaisesRegex(ReviewUIError, "live verified image"):
                     make_review_decision(
                         received, decision=decision, reviewer="owner", categories=[],
-                        timestamp="2026-08-02T11:00:00Z",
+                        timestamp="2026-08-02T11:00:00Z", verified_image_sha256=received["sha256"],
                     )
-        rejected = make_review_decision(
+        self.assertEqual(make_review_decision(
             received, decision="reject", reviewer="owner", categories=["other"],
             timestamp="2026-08-02T11:00:00Z",
-        )
-        self.assertEqual(rejected["decision"], "reject")
+        )["decision"], "reject")
 
         for path in self.manifests.glob("*.json"):
             path.unlink()
-        verified_bytes = self.seed(with_image=True)
+        self.seed(with_image=True)
         verified = load_review_data(self.manifests, self.assets).candidates[0].payload
-        self.assertTrue(verified_bytes)
+        with self.assertRaisesRegex(ReviewUIError, "live verified image"):
+            make_review_decision(
+                verified, decision="accept", reviewer="owner", categories=[],
+                timestamp="2026-08-02T11:00:01Z",
+            )
         accepted = make_review_decision(
             verified, decision="accept", reviewer="owner", categories=[],
-            timestamp="2026-08-02T11:00:01Z",
+            timestamp="2026-08-02T11:00:02Z", verified_image_sha256=verified["sha256"],
         )
         self.assertEqual(accepted["decision"], "accept")
         unavailable = dict(verified)
         unavailable["image_available"] = False
-        with self.assertRaisesRegex(ReviewUIError, "verified image"):
+        with self.assertRaisesRegex(ReviewUIError, "live verified image"):
             make_review_decision(
                 unavailable, decision="shortlist", reviewer="owner", categories=[],
-                timestamp="2026-08-02T11:00:02Z",
+                timestamp="2026-08-02T11:00:03Z", verified_image_sha256=verified["sha256"],
+            )
+        with self.assertRaisesRegex(ReviewUIError, "live verified image"):
+            make_review_decision(
+                verified, decision="shortlist", reviewer="owner", categories=[],
+                timestamp="2026-08-02T11:00:04Z", verified_image_sha256="b" * 64,
             )
 
     def test_imported_review_must_bind_current_request_and_checksum(self) -> None:
@@ -175,7 +183,10 @@ class ReviewUITest(unittest.TestCase):
         self.seed(with_image=True)
         candidate = load_review_data(self.manifests, self.assets).candidates[0].payload
         with self.assertRaises(ReviewUIError):
-            make_review_decision(candidate, decision="accept", reviewer="owner", categories=["invented"])
+            make_review_decision(
+                candidate, decision="accept", reviewer="owner", categories=["invented"],
+                verified_image_sha256=candidate["sha256"],
+            )
         self.assertIn("identity_drift", REVIEW_CATEGORIES)
 
     def test_path_traversal_and_symlink_escape_are_rejected(self) -> None:
@@ -216,9 +227,9 @@ class ReviewUITest(unittest.TestCase):
             script = connection.getresponse()
             script_body = script.read()
             self.assertEqual(script.status, 200)
-            self.assertIn(b"APPROVAL_DECISIONS", script_body)
+            self.assertIn(b"liveVerifiedChecksum", script_body)
+            self.assertIn(b"crypto.subtle.digest", script_body)
             self.assertIn(b"image_available", script_body)
-            self.assertIn(b"technically_valid", script_body)
             connection.request("HEAD", "/")
             head = connection.getresponse()
             self.assertEqual(head.status, 200)
