@@ -28,10 +28,8 @@ function populateSelect(id, values) {
 
 function filteredCandidates() {
   const checks = [
-    ["character-filter", "character_id"],
-    ["role-filter", "role"],
-    ["expression-filter", "expression"],
-    ["pose-filter", "pose"],
+    ["character-filter", "character_id"], ["role-filter", "role"],
+    ["expression-filter", "expression"], ["pose-filter", "pose"],
     ["review-filter", "review_state"],
   ];
   return state.candidates.filter((candidate) =>
@@ -107,8 +105,7 @@ function canApprove(candidate) {
 }
 
 function syncDecisionOptions() {
-  const candidate = selectedReviewCandidate();
-  const reviewable = canApprove(candidate);
+  const reviewable = canApprove(selectedReviewCandidate());
   [...$("decision").options].forEach((item) => {
     item.disabled = !reviewable && APPROVAL_DECISIONS.has(item.value);
   });
@@ -124,7 +121,6 @@ function renderComparison() {
   selected.forEach((candidate) => grid.append(candidateCard(candidate, true)));
   if (!selected.length) grid.append(element("p", "候補カードの「比較する」を選択してください。", "empty"));
   $("selected-count").textContent = `${selected.length}/4`;
-
   const reviewCandidate = $("review-candidate");
   const current = reviewCandidate.value;
   reviewCandidate.replaceChildren();
@@ -142,39 +138,47 @@ function utcTimestamp() {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
-function reviewDocument() {
+function digestHex(buffer) {
+  return [...new Uint8Array(buffer)].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+async function liveVerifiedChecksum(candidate) {
+  if (!canApprove(candidate) || !candidate.image_url || !globalThis.crypto?.subtle) return null;
+  const response = await fetch(candidate.image_url, { cache: "no-store" });
+  if (!response.ok || response.headers.get("Content-Type") !== "image/png") return null;
+  const bytes = await response.arrayBuffer();
+  const digest = digestHex(await crypto.subtle.digest("SHA-256", bytes));
+  return digest === candidate.sha256 ? digest : null;
+}
+
+async function reviewDocument() {
   const candidate = selectedReviewCandidate();
   if (!candidate) throw new Error("比較ボードから対象候補を選んでください。");
   const reviewer = $("reviewer").value.trim();
   if (!reviewer) throw new Error("レビュアー名を入力してください。");
   const decision = $("decision").value;
-  if (APPROVAL_DECISIONS.has(decision) && !canApprove(candidate)) {
-    throw new Error("採用または候補入りには technically_valid かつ検証済み画像の候補が必要です。");
+  if (APPROVAL_DECISIONS.has(decision)) {
+    const verified = await liveVerifiedChecksum(candidate);
+    if (!verified) throw new Error("採用または候補入りには、現在取得できる検証済み画像が必要です。");
   }
   const timestamp = utcTimestamp();
   const categories = [...document.querySelectorAll("#category-list input:checked")]
     .map((input) => input.value).sort();
   const stamp = timestamp.replace(/\D/g, "");
   const documentValue = {
-    kind: "review-decision",
-    schema_version: "1.0",
+    kind: "review-decision", schema_version: "1.0",
     id: `review-${candidate.id}-${decision.replace("_", "-")}-${stamp}`,
-    candidate_ref: candidate.id,
-    candidate_request_ref: candidate.request_id,
-    candidate_sha256: candidate.sha256,
-    decision,
-    reviewer,
-    timestamp,
-    categories,
+    candidate_ref: candidate.id, candidate_request_ref: candidate.request_id,
+    candidate_sha256: candidate.sha256, decision, reviewer, timestamp, categories,
   };
   const notes = $("notes").value.trim();
   if (notes) documentValue.notes = notes;
   return documentValue;
 }
 
-function downloadReview() {
+async function downloadReview() {
   try {
-    const documentValue = reviewDocument();
+    const documentValue = await reviewDocument();
     const text = `${JSON.stringify(documentValue, null, 2)}\n`;
     $("review-preview").textContent = text;
     const blob = new Blob([text], { type: "application/json" });
