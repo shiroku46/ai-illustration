@@ -42,13 +42,8 @@ class CandidateView:
     asset_spec: dict[str, Any]
 
     def read_verified_asset(self) -> bytes | None:
-        path = _verified_asset(self.asset_root, self.asset_spec)
-        if path is None:
-            return None
-        try:
-            return path.read_bytes()
-        except OSError:
-            return None
+        """Return the same immutable buffer that passed every validation check."""
+        return _verified_asset_bytes(self.asset_root, self.asset_spec)
 
 
 @dataclass(frozen=True)
@@ -118,7 +113,8 @@ def _read_manifests(root: Path) -> list[Manifest]:
     return manifests
 
 
-def _verified_asset(asset_root: Path, candidate: dict[str, Any]) -> Path | None:
+def _verified_asset_bytes(asset_root: Path, candidate: dict[str, Any]) -> bytes | None:
+    """Read once, validate that exact buffer, and return it without a second path read."""
     try:
         path = resolve_beneath(asset_root, candidate["path"], require_file=True)
         payload = path.read_bytes()
@@ -127,7 +123,7 @@ def _verified_asset(asset_root: Path, candidate: dict[str, Any]) -> Path | None:
         info = _parse_png(payload)
         if info.width != candidate["width"] or info.height != candidate["height"] or not info.has_alpha or not info.has_srgb:
             return None
-        return path
+        return payload
     except (KeyError, OSError, ReviewUIError, ValueError):
         return None
 
@@ -179,7 +175,7 @@ def load_review_data(manifest_root: Path, asset_root: Path) -> ReviewData:
         if character is None:
             raise ReviewUIError(f"request {request.manifest_id} has no character specification")
         prior = _validated_prior_reviews(candidate_id, candidate, request_id, reviews)
-        available = _verified_asset(asset_root, candidate) is not None
+        available = _verified_asset_bytes(asset_root, candidate) is not None
         payload = {
             "id": candidate_id, "request_id": request.manifest_id, "character_id": character_id,
             "role": character.data.get("role"), "pose": request.data.get("pose"),
