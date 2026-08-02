@@ -42,7 +42,6 @@ class CandidateView:
     asset_spec: dict[str, Any]
 
     def read_verified_asset(self) -> bytes | None:
-        """Return the same immutable buffer that passed every validation check."""
         return _verified_asset_bytes(self.asset_root, self.asset_spec)
 
 
@@ -114,7 +113,6 @@ def _read_manifests(root: Path) -> list[Manifest]:
 
 
 def _verified_asset_bytes(asset_root: Path, candidate: dict[str, Any]) -> bytes | None:
-    """Read once, validate that exact buffer, and return it without a second path read."""
     try:
         path = resolve_beneath(asset_root, candidate["path"], require_file=True)
         payload = path.read_bytes()
@@ -200,6 +198,8 @@ def make_review_decision(
 ) -> dict[str, Any]:
     if decision not in DECISIONS:
         raise ReviewUIError("unsupported review decision")
+    if decision in {"accept", "shortlist"} and candidate.get("candidate_status") != "technically_valid":
+        raise ReviewUIError("accept and shortlist require a technically_valid candidate")
     if not reviewer or not reviewer.strip():
         raise ReviewUIError("reviewer is required")
     if any(item not in REVIEW_CATEGORIES for item in categories):
