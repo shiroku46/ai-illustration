@@ -511,6 +511,12 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
     production = package.get("intent") == "production"
     if package.get("intent") not in {"evaluation", "production"}:
         raise ExportError("PACKAGE_INTENT", "package intent must be evaluation or production", "intent")
+    if production and package.get("license_status") != "approved":
+        raise ExportError(
+            "PRODUCTION_LICENSE_NOT_APPROVED",
+            "production package licensing must remain approved",
+            "license_status",
+        )
     expected_index_entries: list[dict[str, Any]] = []
 
     for item in items:
