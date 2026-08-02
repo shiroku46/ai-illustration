@@ -8,7 +8,8 @@ The repository defines product, architecture, style, and asset contracts and inc
 
 - a fixture-only manifest validation core;
 - a deterministic local tool/hardware catalog;
-- a non-executing ComfyUI API-workflow adapter that validates workflows and creates dry-run execution plans.
+- a non-executing ComfyUI API-workflow adapter that validates workflows and creates dry-run execution plans;
+- a read-only local candidate comparison UI that exports structured review-decision JSON in the browser.
 
 It does **not** install a model, start ComfyUI, contact a server, or generate production images.
 
@@ -17,6 +18,8 @@ Six production manifest types are supported: character specification, style prof
 The tool-evaluation catalog can validate synthetic tool/model profiles, list them deterministically, and compare declared hardware requirements with a local hardware profile. Compatibility never implies license or commercial-use approval.
 
 The ComfyUI adapter accepts only loopback HTTP endpoints, rejects credentials and secret-like values, binds only explicitly allowlisted workflow inputs, records deterministic workflow checksums, and always remains in dry-run mode.
+
+The review UI binds only to `127.0.0.1`, serves local static files and validated candidate PNGs only, never writes server-side files, and creates review JSON as a browser download.
 
 ## Run without installation
 
@@ -27,10 +30,25 @@ PYTHONPATH=src python -m ai_illustration.cli catalog-list tests/fixtures/catalog
 PYTHONPATH=src python -m ai_illustration.cli catalog-compat tests/fixtures/catalog/tool-profile.json tests/fixtures/catalog/hardware-profile.json
 PYTHONPATH=src python -m ai_illustration.cli adapter-check tests/fixtures/comfyui/workflow-api.json
 PYTHONPATH=src python -m ai_illustration.cli adapter-plan tests/fixtures/valid/generation-request.json tests/fixtures/comfyui/workflow-api.json --bindings tests/fixtures/comfyui/bindings.json
+PYTHONPATH=src python -m ai_illustration.cli review-ui path/to/manifest-directory --asset-root path/to/asset-directory --port 8765
 PYTHONPATH=src python -m unittest discover -s tests
 ```
 
-Commands write deterministic machine-readable JSON to stdout, a short summary to stderr, and return nonzero for invalid data.
+Commands write deterministic machine-readable JSON to stdout, a short summary to stderr, and return nonzero for invalid data. The long-running `review-ui` command prints its local URL and stops with `Ctrl+C`.
+
+## Local candidate review
+
+The manifest directory may contain character specifications, generation requests, candidate assets, and prior review decisions. Candidate images are optional: a missing, invalid, checksum-mismatched, non-sRGB, or non-alpha PNG is represented by a metadata placeholder rather than being served.
+
+The browser UI supports deterministic candidate ordering, role/character/expression/pose/review filters, comparison of up to four candidates, provenance and checksum inspection, and structured decisions using the anti-AI and identity-drift categories. Downloaded review JSON includes the immutable candidate checksum and source request ID and can be validated with the existing `validate` command after it is placed with the referenced manifests.
+
+Security boundaries:
+
+- the listener is fixed to `127.0.0.1`;
+- only `GET` and `HEAD` are accepted;
+- static routes and candidate-image routes are explicit;
+- manifest and asset paths must remain beneath their configured roots, including after symlink resolution;
+- no remote scripts, fonts, analytics, cookies, storage dependency, uploads, or server-side mutation are used.
 
 ## Validation boundaries
 
@@ -49,4 +67,4 @@ The adapter distinguishes planning from authorization:
 - `execute()` is deliberately disabled;
 - no socket, subprocess, external request, model loading, or image output is performed.
 
-No compatibility or adapter result grants a license or approves commercial use.
+No compatibility, adapter, or review result grants a license or approves commercial use.

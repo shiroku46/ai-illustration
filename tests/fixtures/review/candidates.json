@@ -1,0 +1,14 @@
+{
+  "candidates": [
+    {
+      "character_id": "boke",
+      "expression": "neutral",
+      "id": "candidate-demo",
+      "image_available": false,
+      "pose": "standing-neutral",
+      "review_state": "unreviewed",
+      "role": "boke"
+    }
+  ],
+  "fixture_only": true
+}

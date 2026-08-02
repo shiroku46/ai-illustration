@@ -1,4 +1,4 @@
-"""Command-line interface for manifests, catalogs, and dry-run adapters."""
+"""Command-line interface for manifests, catalogs, adapters, and local review."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import sys
 from .adapters import AdapterError, ComfyUIAdapter, load_json_object
 from .catalog import catalog_listing, evaluate_compatibility, load_catalog, validate_hardware_profile
 from .models import load_manifest
+from .review_ui import ReviewUIError, run_review_ui
 from .validation import validate_path
 
 
@@ -32,6 +33,10 @@ def build_parser() -> argparse.ArgumentParser:
     adapter_plan.add_argument("workflow", type=Path)
     adapter_plan.add_argument("--bindings", type=Path)
     adapter_plan.add_argument("--endpoint", default="http://127.0.0.1:8188")
+    review_ui = subparsers.add_parser("review-ui", help="start the read-only candidate review UI on 127.0.0.1")
+    review_ui.add_argument("manifest_root", type=Path)
+    review_ui.add_argument("--asset-root", type=Path, required=True)
+    review_ui.add_argument("--port", type=int, default=8765)
     return parser
 
 
@@ -54,6 +59,17 @@ def main(argv: list[str] | None = None) -> int:
             "validation succeeded" if not diagnostics else f"validation failed with {len(diagnostics)} diagnostic(s)",
             not diagnostics,
         )
+
+    if args.command == "review-ui":
+        try:
+            run_review_ui(args.manifest_root, args.asset_root, args.port)
+            return 0
+        except (OSError, ReviewUIError) as exc:
+            return _emit(
+                {"ok": False, "diagnostics": [{"code": "REVIEW_UI_ERROR", "message": str(exc)}]},
+                "review UI could not start",
+                False,
+            )
 
     if args.command in {"adapter-check", "adapter-plan"}:
         adapter = ComfyUIAdapter()
