@@ -60,3 +60,19 @@ class ValidationTests(unittest.TestCase):
     def test_unknown_provenance_fails(self) -> None:
         codes = self._validate_modified(lambda docs: docs["generation-request.json"].__setitem__("provenance", {}))
         self.assertIn("UNKNOWN_PROVENANCE", codes)
+
+    def test_export_requires_approved_source_chain(self) -> None:
+        def mutate(docs):
+            docs["generation-request.json"]["license_status"] = "rejected"
+            docs["character-spec.json"]["review_status"] = "draft"
+            docs["style-profile.json"]["license_status"] = "unreviewed"
+        codes = self._validate_modified(mutate)
+        self.assertIn("SOURCE_NOT_APPROVED", codes)
+
+    def test_export_metadata_must_match_source_request(self) -> None:
+        codes = self._validate_modified(lambda docs: docs["export-manifest.json"].__setitem__("pose", "pointing"))
+        self.assertIn("SOURCE_METADATA_MISMATCH", codes)
+
+    def test_review_is_bound_to_candidate_checksum(self) -> None:
+        codes = self._validate_modified(lambda docs: docs["review-decision.json"].__setitem__("candidate_sha256", "b" * 64))
+        self.assertIn("REVIEW_CHECKSUM_MISMATCH", codes)
