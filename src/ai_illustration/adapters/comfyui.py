@@ -26,6 +26,7 @@ SECRET_KEY_RE = re.compile(
 SECRET_VALUE_RE = re.compile(r"^(?:bearer\s+|sk-[A-Za-z0-9]|gh[opusr]_[A-Za-z0-9])", re.IGNORECASE)
 NODE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 SOURCE_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$")
+ALLOWED_LOOPBACK_IPS = {ipaddress.ip_address("127.0.0.1"), ipaddress.ip_address("::1")}
 
 
 def canonical_json_bytes(value: Any) -> bytes:
@@ -59,21 +60,23 @@ def sanitize_loopback_endpoint(endpoint: str) -> str:
     host = parsed.hostname
     if host is None:
         raise AdapterError("UNSAFE_ENDPOINT", "endpoint host is required", "endpoint")
-    allowed = host.lower() == "localhost"
-    if not allowed:
+    host_lower = host.lower()
+    if host_lower == "localhost":
+        hostname = "localhost"
+    else:
         try:
-            allowed = ipaddress.ip_address(host).is_loopback
-        except ValueError:
-            allowed = False
-    if not allowed:
-        raise AdapterError("UNSAFE_ENDPOINT", "endpoint must use a loopback host", "endpoint")
+            address = ipaddress.ip_address(host)
+        except ValueError as exc:
+            raise AdapterError("UNSAFE_ENDPOINT", "endpoint must use an approved loopback host", "endpoint") from exc
+        if address not in ALLOWED_LOOPBACK_IPS:
+            raise AdapterError("UNSAFE_ENDPOINT", "endpoint must be localhost, 127.0.0.1, or ::1", "endpoint")
+        hostname = str(address)
     try:
         port = parsed.port
     except ValueError as exc:
         raise AdapterError("UNSAFE_ENDPOINT", "endpoint port is invalid", "endpoint") from exc
     if port is not None and not 1 <= port <= 65535:
         raise AdapterError("UNSAFE_ENDPOINT", "endpoint port is invalid", "endpoint")
-    hostname = "localhost" if host.lower() == "localhost" else str(ipaddress.ip_address(host))
     netloc = f"[{hostname}]" if ":" in hostname else hostname
     if port is not None:
         netloc += f":{port}"
