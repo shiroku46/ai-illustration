@@ -14,9 +14,9 @@ The tool-evaluation catalog can validate synthetic tool/model profiles, list the
 
 ```bash
 PYTHONPATH=src python -m ai_illustration.cli validate tests/fixtures/valid
-PYTHONPATH=src python -m ai_illustration.cli catalog-validate tests/fixtures/valid/tool-profile.json
-PYTHONPATH=src python -m ai_illustration.cli catalog-list tests/fixtures/valid/tool-profile.json
-PYTHONPATH=src python -m ai_illustration.cli catalog-compat tests/fixtures/valid/tool-profile.json tests/fixtures/valid/hardware-profile.json
+PYTHONPATH=src python -m ai_illustration.cli catalog-validate tests/fixtures/catalog/tool-profile.json
+PYTHONPATH=src python -m ai_illustration.cli catalog-list tests/fixtures/catalog/tool-profile.json
+PYTHONPATH=src python -m ai_illustration.cli catalog-compat tests/fixtures/catalog/tool-profile.json tests/fixtures/catalog/hardware-profile.json
 PYTHONPATH=src python -m unittest discover -s tests
 ```
 
