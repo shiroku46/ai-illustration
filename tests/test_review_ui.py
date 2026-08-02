@@ -111,6 +111,23 @@ class ReviewUITest(unittest.TestCase):
         self.assertEqual(review["categories"], ["generic_eyes", "line_uniformity"])
         self.assertEqual(validate_document(Manifest(Path("review.json"), review)), [])
 
+    def test_imported_review_must_bind_current_request_and_checksum(self) -> None:
+        self.seed()
+        base = {
+            "kind": "review-decision", "schema_version": "1.0", "id": "review-demo",
+            "candidate_ref": "candidate-demo", "candidate_request_ref": "request-wrong",
+            "candidate_sha256": "a" * 64, "decision": "reject", "reviewer": "owner",
+            "timestamp": "2026-08-02T11:00:00Z", "categories": ["other"],
+        }
+        self.write_json("review.json", base)
+        with self.assertRaisesRegex(ReviewUIError, "source request"):
+            load_review_data(self.manifests, self.assets)
+        base["candidate_request_ref"] = "request-demo"
+        base["candidate_sha256"] = "b" * 64
+        self.write_json("review.json", base)
+        with self.assertRaisesRegex(ReviewUIError, "candidate checksum"):
+            load_review_data(self.manifests, self.assets)
+
     def test_review_rejects_unknown_category(self) -> None:
         self.seed()
         candidate = load_review_data(self.manifests, self.assets).candidates[0].payload
