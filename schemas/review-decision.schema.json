@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "candidate_ref": {},
+    "candidate_request_ref": {"pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string"},
+    "candidate_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "categories": {},
+    "decision": {},
+    "id": {"pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string"},
+    "kind": {"const": "review-decision"},
+    "reviewer": {},
+    "schema_version": {"const": "1.0"},
+    "timestamp": {}
+  },
+  "required": ["kind", "schema_version", "id", "candidate_ref", "candidate_request_ref", "candidate_sha256", "decision", "reviewer", "timestamp", "categories"],
+  "title": "review-decision",
+  "type": "object"
+}

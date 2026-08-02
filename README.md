@@ -1,39 +1,24 @@
-# AI Development Automation Foundation
+# AI Illustration Pipeline
 
-A public, reusable, history-free foundation for guarded AI-assisted development on GitHub.
+Local-first development for a fixed two-woman manzai character illustration workflow.
 
-## What this repository provides
+## Current capability
 
-- read-only CI that is safe for forked pull requests;
-- an owner-authorized Claude issue queue;
-- bounded reconciliation for missing trusted checks;
-- a deterministic recovery and merge decision engine;
-- a default-branch-controlled supervisor that never executes proposed-branch code with write permissions;
-- a Bootstrap generator for installing the same controls in another repository;
-- security, export, workflow, and policy regression tests.
+The repository defines product, architecture, style, and asset contracts and includes a fixture-only manifest validation core. It does **not** install a model or generate production images.
 
-## Safety model
+Six manifest types are supported: character specification, style profile, generation request, candidate asset, review decision, and export manifest.
 
-Untrusted pull-request code runs only in jobs with `contents: read` and without Secrets, OIDC, or write permissions. Jobs that can comment, relabel, dispatch, close, mark ready, or merge operate only from the default branch, inspect immutable current SHAs, require same-repository provenance, use fixed workflow names and refs, bound their candidate set, and use an expected-head-SHA merge guard.
-
-The queue accepts issue creation or an exact standalone `/claude-run` comment only when `github.actor` is the configured owner. A separate default-branch-only trusted dispatch path is available to the supervisor.
-
-## Validation
+## Run without installation
 
 ```bash
-python scripts/public_export_guard.py .
-python scripts/validate_repository.py
-python -m unittest discover -s tests
+PYTHONPATH=src python -m ai_illustration.cli validate tests/fixtures/valid
+PYTHONPATH=src python -m unittest discover -s tests
 ```
 
-## Bootstrap
+The validator writes machine-readable JSON diagnostics to stdout, a short summary to stderr, and returns nonzero for invalid data.
 
-```bash
-python bootstrap/generator.py --target ../example-repository --owner YOUR_GITHUB_LOGIN
-```
+## Validation rules
 
-Review the generated install checklist before enabling write-capable workflows. Repository Secrets are never generated, copied, or printed.
+The MVP checks deterministic identifiers and export paths, safe relative paths, SHA-256 format, dimensions, sRGB and alpha declarations, provenance, licensing state, review readiness, and cross-document references.
 
-## Project status
-
-This public repository is the implementation source of truth. Earlier private sandboxes remain archives and are not imported into this history.
+No network request, image generation, model download, database, server, or hosted service is used.

@@ -1,0 +1,12 @@
+{
+  "candidate_ref": "candidate-demo",
+  "candidate_request_ref": "request-demo",
+  "candidate_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "categories": ["fixture-only"],
+  "decision": "needs_revision",
+  "id": "review-demo",
+  "kind": "review-decision",
+  "reviewer": "fixture-reviewer",
+  "schema_version": "1.0",
+  "timestamp": "2026-08-02T00:00:00Z"
+}
