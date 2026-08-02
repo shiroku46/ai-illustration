@@ -2,7 +2,7 @@
   "canvas": null,
   "character_ref": "boke@v001",
   "editable_source_format": null,
-  "id": "variant-set-47e4f89deff443da0090",
+  "id": "variant-set-5a90df4c3ba46c88ff45",
   "intent": "evaluation",
   "kind": "variant-set",
   "layer_strategy": null,
@@ -13,7 +13,7 @@
   "role": "boke",
   "schema_version": "1.0",
   "source_candidate_ref": "candidate-demo",
-  "source_candidate_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "source_candidate_sha256": "31e567633479d71554c5f5b00c7d831aeece9bde5b581216a37ccce20c3f2f66",
   "source_request_ref": "request-demo",
   "stage_side": null,
   "style_ref": "rough-flat@v001",
@@ -26,15 +26,15 @@
       "facing": "front",
       "format": "png",
       "has_alpha": true,
-      "height": 2048,
-      "id": "variant-9ddd7c46a53d74c6d52d",
+      "height": 1,
+      "id": "variant-bad0407a3784746a895f",
       "media_type": "image/png",
       "mouth_state": "closed",
       "paper_theater_key": "boke.boke.neutral.listening.front.full.closed",
-      "path": "variants/v1/boke/full/front/listening-neutral-closed/variant-9ddd7c46a53d74c6d52d.png",
+      "path": "variants/v1/boke/full/front/listening-neutral-closed/variant-bad0407a3784746a895f.png",
       "pose": "listening",
-      "sidecar_path": "variants/v1/boke/full/front/listening-neutral-closed/variant-9ddd7c46a53d74c6d52d.json",
-      "width": 1024
+      "sidecar_path": "variants/v1/boke/full/front/listening-neutral-closed/variant-bad0407a3784746a895f.json",
+      "width": 1
     },
     {
       "color_space": "sRGB",
@@ -43,14 +43,14 @@
       "facing": "front",
       "format": "png",
       "has_alpha": true,
-      "height": 2048,
-      "id": "variant-11d591dfc7f9e7d00bb0",
+      "height": 1,
+      "id": "variant-065de3c2d114fbdcd8ee",
       "media_type": "image/png",
       "paper_theater_key": "boke.boke.smile.talking.front.full",
-      "path": "variants/v1/boke/full/front/talking-smile/variant-11d591dfc7f9e7d00bb0.png",
+      "path": "variants/v1/boke/full/front/talking-smile/variant-065de3c2d114fbdcd8ee.png",
       "pose": "talking",
-      "sidecar_path": "variants/v1/boke/full/front/talking-smile/variant-11d591dfc7f9e7d00bb0.json",
-      "width": 1024
+      "sidecar_path": "variants/v1/boke/full/front/talking-smile/variant-065de3c2d114fbdcd8ee.json",
+      "width": 1
     }
   ]
 }
