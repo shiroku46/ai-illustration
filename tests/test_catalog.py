@@ -73,8 +73,10 @@ class CatalogTests(unittest.TestCase):
         schema = json.loads((ROOT / "schemas" / "tool-profile.schema.json").read_text(encoding="utf-8"))
         conditional = schema["allOf"][0]
         self.assertEqual("approved", conditional["if"]["properties"]["decision_state"]["const"])
-        self.assertEqual("approved", conditional["then"]["properties"]["license_evidence_state"]["const"])
-        self.assertEqual("approved", conditional["then"]["properties"]["commercial_use_review_state"]["const"])
+        then_properties = conditional["then"]["properties"]
+        self.assertEqual("approved", then_properties["license_evidence_state"]["const"])
+        self.assertEqual("approved", then_properties["commercial_use_review_state"]["const"])
+        self.assertEqual(1, then_properties["evidence_references"]["minItems"])
 
     def test_rejects_contradictory_or_unknown_fields(self) -> None:
         tool = copy.deepcopy(self.tool)
