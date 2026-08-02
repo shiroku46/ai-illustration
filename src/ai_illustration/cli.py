@@ -1,4 +1,4 @@
-"""Command-line interface for manifests, catalogs, adapters, and local review."""
+"""Command-line interface for manifests, catalogs, adapters, local review, and variants."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from .catalog import catalog_listing, evaluate_compatibility, load_catalog, vali
 from .models import load_manifest
 from .review_ui import ReviewUIError, run_review_ui
 from .validation import validate_path
+from .variants import VariantError, check_variant_set, load_json_object as load_variant_json, plan_variant_set
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,6 +38,14 @@ def build_parser() -> argparse.ArgumentParser:
     review_ui.add_argument("manifest_root", type=Path)
     review_ui.add_argument("--asset-root", type=Path, required=True)
     review_ui.add_argument("--port", type=int, default=8765)
+    variant_plan = subparsers.add_parser("variant-plan", help="create a deterministic reviewed variant-set plan")
+    variant_plan.add_argument("manifest_root", type=Path)
+    variant_plan.add_argument("--source-candidate", required=True)
+    variant_plan.add_argument("--matrix", type=Path, required=True)
+    variant_plan.add_argument("--intent", choices=("evaluation", "production"), required=True)
+    variant_check = subparsers.add_parser("variant-check", help="validate a variant-set against its source manifests")
+    variant_check.add_argument("variant_set", type=Path)
+    variant_check.add_argument("--manifest-root", type=Path, required=True)
     return parser
 
 
@@ -59,6 +68,23 @@ def main(argv: list[str] | None = None) -> int:
             "validation succeeded" if not diagnostics else f"validation failed with {len(diagnostics)} diagnostic(s)",
             not diagnostics,
         )
+
+    if args.command in {"variant-plan", "variant-check"}:
+        try:
+            if args.command == "variant-plan":
+                matrix = load_variant_json(args.matrix)
+                plan = plan_variant_set(args.manifest_root, args.source_candidate, matrix, args.intent)
+                summary = f"planned {len(plan['variants'])} reviewed variant(s)"
+            else:
+                plan = check_variant_set(args.variant_set, args.manifest_root)
+                summary = f"validated {len(plan['variants'])} reviewed variant(s)"
+            return _emit({"ok": True, "variant_set": plan}, summary, True)
+        except VariantError as exc:
+            return _emit(
+                {"ok": False, "diagnostics": [exc.to_dict()]},
+                f"variant validation failed: {exc.code}",
+                False,
+            )
 
     if args.command == "review-ui":
         try:
