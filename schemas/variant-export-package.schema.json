@@ -40,9 +40,25 @@
           "png_path": {"type": "string", "pattern": "^variants/v1/.+\\.png$"},
           "png_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "sidecar_path": {"type": "string", "pattern": "^variants/v1/.+\\.json$"},
-          "sidecar_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          "sidecar_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "variant_review_ref": {"type": "string", "pattern": "^variant-review-[0-9a-f]{20}$"},
+          "variant_review_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"intent": {"const": "production"}}},
+      "then": {
+        "properties": {
+          "items": {
+            "items": {
+              "required": ["variant_review_ref", "variant_review_sha256"]
+            }
+          }
+        }
+      }
+    }
+  ]
 }
