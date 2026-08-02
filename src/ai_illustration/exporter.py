@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import tempfile
 from typing import Any
@@ -17,6 +18,16 @@ from .variants import check_variant_set
 
 PACKAGE_MANIFEST = "package-manifest.json"
 PAPER_THEATER_INDEX = "paper-theater-index.json"
+VARIANT_SET_RE = re.compile(r"variant-set-[0-9a-f]{20}")
+VARIANT_ID_RE = re.compile(r"variant-[0-9a-f]{20}")
+VARIANT_REVIEW_RE = re.compile(r"variant-review-[0-9a-f]{20}")
+PACKAGE_ID_RE = re.compile(r"variant-export-package-[0-9a-f]{20}")
+INDEX_ID_RE = re.compile(r"paper-theater-index-[0-9a-f]{20}")
+VERSIONED_REF_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*@v[0-9]{3}")
+PAPER_KEY_RE = re.compile(r"[a-z0-9.-]+")
+PNG_PATH_RE = re.compile(r"variants/v1/.+\.png")
+SIDECAR_PATH_RE = re.compile(r"variants/v1/.+\.json")
+REVIEW_PATH_RE = re.compile(r"reviews/variant-[0-9a-f]{20}\.json")
 VARIANT_REVIEW_FIELDS = {
     "id",
     "kind",
@@ -52,6 +63,7 @@ PACKAGE_FIELDS = {
     "items",
 }
 INDEX_FIELDS = {"id", "kind", "schema_version", "variant_set_ref", "intent", "entries"}
+INDEX_ENTRY_FIELDS = {"key", "variant_id", "png_path", "sidecar_path", "sha256"}
 ITEM_BASE_FIELDS = {
     "variant_id",
     "paper_theater_key",
@@ -180,6 +192,17 @@ def _require_string(value: Any, field: str, code: str) -> str:
     return value
 
 
+def _require_pattern(value: Any, pattern: re.Pattern[str], field: str, code: str) -> str:
+    text = _require_string(value, field, code)
+    if not pattern.fullmatch(text):
+        raise ExportError(code, f"{field} has an invalid published identifier format", field)
+    return text
+
+
+def _require_token(value: Any, field: str, code: str) -> str:
+    return _require_pattern(value, TOKEN_RE, field, code)
+
+
 def _require_sha256(value: Any, field: str, code: str) -> str:
     if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
         raise ExportError(code, f"{field} must be a SHA-256 checksum", field)
@@ -195,17 +218,14 @@ def _require_exact_fields(value: dict[str, Any], expected: set[str], code: str, 
 
 def _validate_package_schema(package: dict[str, Any], field: str) -> None:
     _require_exact_fields(package, PACKAGE_FIELDS, "PACKAGE_SCHEMA", field)
+    _require_pattern(package.get("id"), PACKAGE_ID_RE, "id", "PACKAGE_SCHEMA")
     if package.get("kind") != "variant-export-package" or package.get("schema_version") != "1.0":
         raise ExportError("PACKAGE_SCHEMA", "invalid package kind or schema version", field)
-    for name in (
-        "variant_set_ref",
-        "source_candidate_ref",
-        "source_request_ref",
-        "review_ref",
-        "character_ref",
-        "style_ref",
-    ):
-        _require_string(package.get(name), name, "PACKAGE_SCHEMA")
+    _require_pattern(package.get("variant_set_ref"), VARIANT_SET_RE, "variant_set_ref", "PACKAGE_SCHEMA")
+    for name in ("source_candidate_ref", "source_request_ref", "review_ref"):
+        _require_token(package.get(name), name, "PACKAGE_SCHEMA")
+    for name in ("character_ref", "style_ref"):
+        _require_pattern(package.get(name), VERSIONED_REF_RE, name, "PACKAGE_SCHEMA")
     _require_sha256(package.get("source_candidate_sha256"), "source_candidate_sha256", "PACKAGE_SCHEMA")
     if package.get("intent") not in {"evaluation", "production"}:
         raise ExportError("PACKAGE_SCHEMA", "package intent must be evaluation or production", "intent")
@@ -241,27 +261,23 @@ def _validate_sidecar_schema(sidecar: dict[str, Any], field: str) -> None:
     _require_exact_fields(sidecar, expected_fields, "SIDECAR_SCHEMA", field)
     if sidecar.get("kind") != "variant-export-sidecar" or sidecar.get("schema_version") != "1.0":
         raise ExportError("SIDECAR_SCHEMA", "invalid sidecar kind or schema version", field)
-    for name in (
-        "variant_set_ref",
-        "variant_id",
-        "paper_theater_key",
-        "source_candidate_ref",
-        "source_request_ref",
-        "review_ref",
-        "character_ref",
-        "style_ref",
-        "source_file",
-    ):
-        _require_string(sidecar.get(name), name, "SIDECAR_SCHEMA")
-    if not TOKEN_RE.fullmatch(sidecar["variant_id"]):
-        raise ExportError("SIDECAR_SCHEMA", "invalid sidecar variant ID", field)
+    _require_pattern(sidecar.get("variant_set_ref"), VARIANT_SET_RE, "variant_set_ref", "SIDECAR_SCHEMA")
+    _require_pattern(sidecar.get("variant_id"), VARIANT_ID_RE, "variant_id", "SIDECAR_SCHEMA")
+    _require_pattern(sidecar.get("paper_theater_key"), PAPER_KEY_RE, "paper_theater_key", "SIDECAR_SCHEMA")
+    for name in ("source_candidate_ref", "source_request_ref", "review_ref"):
+        _require_token(sidecar.get(name), name, "SIDECAR_SCHEMA")
+    for name in ("character_ref", "style_ref"):
+        _require_pattern(sidecar.get(name), VERSIONED_REF_RE, name, "SIDECAR_SCHEMA")
+    _require_string(sidecar.get("source_file"), "source_file", "SIDECAR_SCHEMA")
     if intent not in {"evaluation", "production"}:
         raise ExportError("SIDECAR_SCHEMA", "invalid sidecar intent", field)
     if sidecar.get("license_status") not in LICENSE_STATUSES:
         raise ExportError("SIDECAR_SCHEMA", "invalid sidecar license status", field)
     _require_sha256(sidecar.get("source_sha256"), "source_sha256", "SIDECAR_SCHEMA")
     _require_sha256(sidecar.get("output_sha256"), "output_sha256", "SIDECAR_SCHEMA")
-    _safe_relative(sidecar.get("output_path"), "output_path")
+    output_path = _safe_relative(sidecar.get("output_path"), "output_path")
+    if not PNG_PATH_RE.fullmatch(output_path):
+        raise ExportError("SIDECAR_SCHEMA", "invalid versioned PNG output path", "output_path")
     for name in ("width", "height"):
         value = sidecar.get(name)
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
@@ -283,6 +299,13 @@ def _validate_sidecar_schema(sidecar: dict[str, Any], field: str) -> None:
         "provenance.source_candidate_sha256",
         "SIDECAR_SCHEMA",
     )
+    if intent == "production":
+        _require_pattern(sidecar.get("variant_review_ref"), VARIANT_REVIEW_RE, "variant_review_ref", "SIDECAR_SCHEMA")
+        review_path = _safe_relative(sidecar.get("variant_review_path"), "variant_review_path")
+        if not REVIEW_PATH_RE.fullmatch(review_path):
+            raise ExportError("SIDECAR_SCHEMA", "invalid variant review path", "variant_review_path")
+        _require_sha256(sidecar.get("variant_review_sha256"), "variant_review_sha256", "SIDECAR_SCHEMA")
+        _require_string(sidecar.get("variant_reviewer"), "variant_reviewer", "SIDECAR_SCHEMA")
 
 
 def _scan_flat_files(root: Path, expected_names: set[str], *, label: str) -> dict[str, Path]:
@@ -369,6 +392,10 @@ def _validate_variant_review_object(
         raise ExportError("VARIANT_REVIEW_FIELDS", f"missing={missing}; extra={extra}", field)
     if review.get("kind") != "variant-review-decision" or review.get("schema_version") != "1.0":
         raise ExportError("VARIANT_REVIEW_SCHEMA", "invalid variant review kind or schema version", field)
+    _require_pattern(review.get("id"), VARIANT_REVIEW_RE, "id", "VARIANT_REVIEW_SCHEMA")
+    _require_pattern(review.get("variant_set_ref"), VARIANT_SET_RE, "variant_set_ref", "VARIANT_REVIEW_SCHEMA")
+    _require_pattern(review.get("variant_id"), VARIANT_ID_RE, "variant_id", "VARIANT_REVIEW_SCHEMA")
+    _require_sha256(review.get("png_sha256"), "png_sha256", "VARIANT_REVIEW_SCHEMA")
     if review.get("variant_set_ref") != variant_set_id or review.get("variant_id") != variant_id:
         raise ExportError("VARIANT_REVIEW_REFERENCE", "variant review does not bind this variant set and ID", field)
     if review.get("png_sha256") != png_sha256:
@@ -465,13 +492,19 @@ def build_export_package(
     if not isinstance(variants, list) or not variants:
         raise ExportError("VARIANTS", "variant-set must contain variants", "variants")
     variant_ids = [str(item.get("id", "")) for item in variants if isinstance(item, dict)]
-    if len(variant_ids) != len(variants) or any(not TOKEN_RE.fullmatch(value) for value in variant_ids):
-        raise ExportError("VARIANT_ID", "every variant must have a valid ID", "variants")
+    if len(variant_ids) != len(variants) or any(not VARIANT_ID_RE.fullmatch(value) for value in variant_ids):
+        raise ExportError("VARIANT_ID", "every variant must have a published variant ID", "variants")
     _ensure_unique(variant_ids, "DUPLICATE_VARIANT_ID", "variant IDs")
     keys = [str(item.get("paper_theater_key", "")) for item in variants]
+    if any(not PAPER_KEY_RE.fullmatch(value) for value in keys):
+        raise ExportError("PAPER_THEATER_KEY", "invalid paper-theater key", "variants")
     _ensure_unique(keys, "DUPLICATE_PAPER_THEATER_KEY", "paper-theater keys")
     png_paths = [str(item.get("path", "")) for item in variants]
     sidecar_paths = [str(item.get("sidecar_path", "")) for item in variants]
+    if any(not PNG_PATH_RE.fullmatch(value) for value in png_paths) or any(
+        not SIDECAR_PATH_RE.fullmatch(value) for value in sidecar_paths
+    ):
+        raise ExportError("OUTPUT_PATH", "variant output paths must use the versioned package layout", "variants")
     _ensure_unique(png_paths + sidecar_paths, "OUTPUT_PATH_COLLISION", "output paths")
 
     source_files = _scan_flat_files(source, {f"{identifier}.png" for identifier in variant_ids}, label="source")
@@ -530,6 +563,7 @@ def build_export_package(
             },
             **review_binding,
         }
+        _validate_sidecar_schema(sidecar, sidecar_path)
         sidecar_payload = _json_bytes(sidecar)
         file_payloads[png_path] = png_payload
         file_payloads[sidecar_path] = sidecar_payload
@@ -581,6 +615,7 @@ def build_export_package(
         "items": items,
     }
     package = {"id": content_identifier("variant-export-package", package_core, 20), **package_core}
+    _validate_package_schema(package, PACKAGE_MANIFEST)
     package_payload = _json_bytes(package)
     file_payloads[PACKAGE_MANIFEST] = package_payload
 
@@ -627,9 +662,7 @@ def build_export_package(
 def check_export_package(package_manifest_path: Path, output_root: Path) -> dict[str, Any]:
     package = _load_object(package_manifest_path)
     _validate_package_schema(package, str(package_manifest_path))
-    identifier = package.get("id")
-    if not isinstance(identifier, str) or not TOKEN_RE.fullmatch(identifier):
-        raise ExportError("PACKAGE_ID", "invalid package ID", "id")
+    identifier = package["id"]
     core = {key: value for key, value in package.items() if key != "id"}
     if content_identifier("variant-export-package", core, 20) != identifier:
         raise ExportError("PACKAGE_ID_MISMATCH", "package ID is not canonical", "id")
@@ -651,11 +684,11 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
         raise ExportError("INDEX_CHECKSUM_MISMATCH", "paper-theater index is missing or modified", index_path)
     index = _load_object_bytes(index_payload, index_path)
     _require_exact_fields(index, INDEX_FIELDS, "INDEX_SCHEMA", index_path)
+    _require_pattern(index.get("id"), INDEX_ID_RE, "id", "INDEX_SCHEMA")
+    _require_pattern(index.get("variant_set_ref"), VARIANT_SET_RE, "variant_set_ref", "INDEX_SCHEMA")
     if index.get("kind") != "paper-theater-index" or index.get("schema_version") != "1.0":
         raise ExportError("INDEX_SCHEMA", "invalid paper-theater index kind or schema version", index_path)
-    index_identifier = index.get("id")
-    if not isinstance(index_identifier, str) or not TOKEN_RE.fullmatch(index_identifier):
-        raise ExportError("INDEX_ID", "invalid paper-theater index ID", index_path)
+    index_identifier = index["id"]
     index_core = {key: value for key, value in index.items() if key != "id"}
     if content_identifier("paper-theater-index", index_core, 20) != index_identifier:
         raise ExportError("INDEX_ID_MISMATCH", "paper-theater index ID is not canonical", index_path)
@@ -665,6 +698,20 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
         raise ExportError("INDEX_BINDING_MISMATCH", "paper-theater index variant set differs from package", index_path)
     if index.get("intent") != package.get("intent"):
         raise ExportError("INDEX_BINDING_MISMATCH", "paper-theater index intent differs from package", index_path)
+    entries = index.get("entries")
+    if not isinstance(entries, list) or not entries:
+        raise ExportError("INDEX_SCHEMA", "index entries must be a non-empty list", index_path)
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ExportError("INDEX_SCHEMA", "index entry must be an object", index_path)
+        _require_exact_fields(entry, INDEX_ENTRY_FIELDS, "INDEX_SCHEMA", index_path)
+        _require_pattern(entry.get("key"), PAPER_KEY_RE, "key", "INDEX_SCHEMA")
+        _require_pattern(entry.get("variant_id"), VARIANT_ID_RE, "variant_id", "INDEX_SCHEMA")
+        png_path = _safe_relative(entry.get("png_path"), "png_path")
+        sidecar_path = _safe_relative(entry.get("sidecar_path"), "sidecar_path")
+        if not PNG_PATH_RE.fullmatch(png_path) or not SIDECAR_PATH_RE.fullmatch(sidecar_path):
+            raise ExportError("INDEX_SCHEMA", "index entry uses an invalid versioned asset path", index_path)
+        _require_sha256(entry.get("sha256"), "sha256", "INDEX_SCHEMA")
 
     items = package["items"]
     production = package["intent"] == "production"
@@ -688,14 +735,19 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
             set(VARIANT_REVIEW_BINDING_FIELDS) if production else set()
         )
         _require_exact_fields(item, expected_item_fields, "PACKAGE_ITEM", "items")
+        variant_id = _require_pattern(item.get("variant_id"), VARIANT_ID_RE, "variant_id", "PACKAGE_ITEM")
+        paper_theater_key = _require_pattern(item.get("paper_theater_key"), PAPER_KEY_RE, "paper_theater_key", "PACKAGE_ITEM")
 
         item_payloads: dict[str, bytes] = {}
         normalized_paths: dict[str, str] = {}
-        for path_field, sha_field in (("png_path", "png_sha256"), ("sidecar_path", "sidecar_sha256")):
+        for path_field, sha_field, path_pattern in (
+            ("png_path", "png_sha256", PNG_PATH_RE),
+            ("sidecar_path", "sidecar_sha256", SIDECAR_PATH_RE),
+        ):
             path = _safe_relative(item.get(path_field), path_field)
-            expected_sha = item.get(sha_field)
-            if not isinstance(expected_sha, str) or not SHA256_RE.fullmatch(expected_sha):
-                raise ExportError("PACKAGE_ITEM_REFERENCE", "invalid package item checksum", sha_field)
+            if not path_pattern.fullmatch(path):
+                raise ExportError("PACKAGE_ITEM_REFERENCE", f"invalid {path_field}", path_field)
+            expected_sha = _require_sha256(item.get(sha_field), sha_field, "PACKAGE_ITEM_REFERENCE")
             payload = inventory.get(path)
             if payload is None or _sha(payload) != expected_sha:
                 raise ExportError("PACKAGE_FILE_MISMATCH", f"missing or modified file: {path}", path)
@@ -703,12 +755,6 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
             item_payloads[path_field] = payload
             normalized_paths[path_field] = path
 
-        variant_id = item.get("variant_id")
-        if not isinstance(variant_id, str) or not TOKEN_RE.fullmatch(variant_id):
-            raise ExportError("VARIANT_ID", "package item has invalid variant ID", "variant_id")
-        paper_theater_key = item.get("paper_theater_key")
-        if not isinstance(paper_theater_key, str) or not paper_theater_key:
-            raise ExportError("PAPER_THEATER_KEY", "package item has invalid paper-theater key", "paper_theater_key")
         expected_index_entries.append({
             "key": paper_theater_key,
             "variant_id": variant_id,
@@ -751,10 +797,11 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
         _validate_packaged_png(item_payloads["png_path"], sidecar, normalized_paths["png_path"])
 
         if production:
+            _require_pattern(item.get("variant_review_ref"), VARIANT_REVIEW_RE, "variant_review_ref", "PACKAGE_ITEM")
             review_path = _safe_relative(item.get("variant_review_path"), "variant_review_path")
-            review_sha = item.get("variant_review_sha256")
-            if not isinstance(review_sha, str) or not SHA256_RE.fullmatch(review_sha):
-                raise ExportError("PRODUCTION_VARIANT_REVIEW_REQUIRED", "invalid variant review checksum", "variant_review_sha256")
+            if not REVIEW_PATH_RE.fullmatch(review_path):
+                raise ExportError("PACKAGE_ITEM", "invalid variant review path", "variant_review_path")
+            review_sha = _require_sha256(item.get("variant_review_sha256"), "variant_review_sha256", "PACKAGE_ITEM")
             review_payload = inventory.get(review_path)
             if review_payload is None or _sha(review_payload) != review_sha:
                 raise ExportError("VARIANT_REVIEW_FILE_MISMATCH", "variant review file is missing or modified", review_path)
