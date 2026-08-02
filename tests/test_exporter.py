@@ -317,6 +317,82 @@ class ExporterTests(unittest.TestCase):
         with self.assertRaisesRegex(ExportError, "INDEX_BINDING_MISMATCH"):
             check_export_package(malicious_root / "package-manifest.json", output)
 
+    def test_export_check_rejects_self_consistent_invalid_packaged_png(self) -> None:
+        output = self.root / "packaged-png"
+        result = self._build(output, write=True)
+        old_root = output / result["package_directory"]
+
+        def publish_tampered(png_payload: bytes) -> Path:
+            malicious_package = copy.deepcopy(result["package"])
+            first_item = malicious_package["items"][0]
+            png_sha = hashlib.sha256(png_payload).hexdigest()
+            first_item["png_sha256"] = png_sha
+
+            sidecar_path = old_root / first_item["sidecar_path"]
+            sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            sidecar["source_sha256"] = png_sha
+            sidecar["output_sha256"] = png_sha
+            sidecar_payload = canonical_json(sidecar) + b"\n"
+            first_item["sidecar_sha256"] = hashlib.sha256(sidecar_payload).hexdigest()
+
+            index_path = old_root / malicious_package["paper_theater_index_path"]
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            matching = next(
+                entry for entry in index["entries"]
+                if entry["variant_id"] == first_item["variant_id"]
+            )
+            matching["sha256"] = png_sha
+            index_core = {key: value for key, value in index.items() if key != "id"}
+            index["id"] = content_identifier("paper-theater-index", index_core, 20)
+            index_payload = canonical_json(index) + b"\n"
+            malicious_package["paper_theater_index_sha256"] = hashlib.sha256(index_payload).hexdigest()
+
+            package_core = {key: value for key, value in malicious_package.items() if key != "id"}
+            malicious_package["id"] = content_identifier("variant-export-package", package_core, 20)
+            malicious_root = output / malicious_package["id"]
+            shutil.copytree(old_root, malicious_root)
+            (malicious_root / first_item["png_path"]).write_bytes(png_payload)
+            (malicious_root / first_item["sidecar_path"]).write_bytes(sidecar_payload)
+            (malicious_root / malicious_package["paper_theater_index_path"]).write_bytes(index_payload)
+            _write_canonical(malicious_root / "package-manifest.json", malicious_package)
+            return malicious_root
+
+        cases = (
+            (b"not-a-png", "PNG_STRUCTURE"),
+            (_png((0, 255, 0, 255), width=2), "PNG_DECLARATION_MISMATCH"),
+            (_png((0, 255, 0, 255), srgb=False), "PNG_SRGB_REQUIRED"),
+        )
+        for png_payload, code in cases:
+            with self.subTest(code=code):
+                malicious_root = publish_tampered(png_payload)
+                with self.assertRaisesRegex(ExportError, code):
+                    check_export_package(malicious_root / "package-manifest.json", output)
+
+    def test_export_check_rejects_self_consistent_package_provenance_changes(self) -> None:
+        output = self.root / "provenance-binding"
+        result = self._build(output, write=True)
+        old_root = output / result["package_directory"]
+        cases = {
+            "source_candidate_ref": "candidate-other",
+            "source_candidate_sha256": "0" * 64,
+            "source_request_ref": "request-other",
+            "review_ref": "review-other",
+            "character_ref": "other@v001",
+            "style_ref": "other-style@v001",
+            "license_status": "rejected",
+        }
+        for field, value in cases.items():
+            with self.subTest(field=field):
+                malicious_package = copy.deepcopy(result["package"])
+                malicious_package[field] = value
+                package_core = {key: item for key, item in malicious_package.items() if key != "id"}
+                malicious_package["id"] = content_identifier("variant-export-package", package_core, 20)
+                malicious_root = output / malicious_package["id"]
+                shutil.copytree(old_root, malicious_root)
+                _write_canonical(malicious_root / "package-manifest.json", malicious_package)
+                with self.assertRaisesRegex(ExportError, "SIDECAR_BINDING_MISMATCH"):
+                    check_export_package(malicious_root / "package-manifest.json", output)
+
     def test_missing_extra_malformed_dimension_srgb_and_alpha_fail_closed(self) -> None:
         first_id = self.variant_set["variants"][0]["id"]
         target = self.sources / f"{first_id}.png"
