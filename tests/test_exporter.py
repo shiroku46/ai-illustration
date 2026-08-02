@@ -25,7 +25,15 @@ def _write_canonical(path: Path, data: dict[str, object]) -> None:
     path.write_bytes(canonical_json(data) + b"\n")
 
 
-def _png(pixel: tuple[int, ...], *, width: int = 1, height: int = 1, srgb: bool = True, color_type: int = 6) -> bytes:
+def _png(
+    pixel: tuple[int, ...],
+    *,
+    width: int = 1,
+    height: int = 1,
+    srgb: bool = True,
+    color_type: int = 6,
+    plte: bytes | None = None,
+) -> bytes:
     channels = 4 if color_type == 6 else 2 if color_type == 4 else 3
     if len(pixel) != channels:
         raise ValueError("pixel channel count mismatch")
@@ -44,6 +52,8 @@ def _png(pixel: tuple[int, ...], *, width: int = 1, height: int = 1, srgb: bool 
     )
     if srgb:
         payload += chunk(b"sRGB", b"\x00")
+    if plte is not None:
+        payload += chunk(b"PLTE", plte)
     payload += chunk(b"IDAT", zlib.compress(row * height)) + chunk(b"IEND", b"")
     return payload
 
@@ -244,6 +254,38 @@ class ExporterTests(unittest.TestCase):
         with self.assertRaisesRegex(ExportError, "VARIANT_REVIEW_FILE_MISMATCH"):
             check_export_package(package_root / "package-manifest.json", output)
 
+    def test_export_check_rejects_self_consistent_rejected_production_license(self) -> None:
+        production, production_path = self._production_variant_set()
+        self._write_approvals(production)
+        output = self.root / "rejected-production-license"
+        result = self._build(
+            output,
+            write=True,
+            variant_set_path=production_path,
+            approval_root=self.approvals,
+        )
+        old_root = output / result["package_directory"]
+        malicious_package = copy.deepcopy(result["package"])
+        malicious_package["license_status"] = "rejected"
+        sidecar_payloads: dict[str, bytes] = {}
+        for item in malicious_package["items"]:
+            sidecar = json.loads(
+                (old_root / item["sidecar_path"]).read_text(encoding="utf-8")
+            )
+            sidecar["license_status"] = "rejected"
+            payload = canonical_json(sidecar) + b"\n"
+            item["sidecar_sha256"] = hashlib.sha256(payload).hexdigest()
+            sidecar_payloads[item["sidecar_path"]] = payload
+        package_core = {key: value for key, value in malicious_package.items() if key != "id"}
+        malicious_package["id"] = content_identifier("variant-export-package", package_core, 20)
+        malicious_root = output / malicious_package["id"]
+        shutil.copytree(old_root, malicious_root)
+        for relative, payload in sidecar_payloads.items():
+            (malicious_root / relative).write_bytes(payload)
+        _write_canonical(malicious_root / "package-manifest.json", malicious_package)
+        with self.assertRaisesRegex(ExportError, "PRODUCTION_LICENSE_NOT_APPROVED"):
+            check_export_package(malicious_root / "package-manifest.json", output)
+
     def test_evaluation_rejects_approval_root_and_embedded_approval_claims(self) -> None:
         with self.assertRaisesRegex(ExportError, "APPROVAL_ROOT_NOT_ALLOWED"):
             self._build(approval_root=self.approvals)
@@ -361,6 +403,7 @@ class ExporterTests(unittest.TestCase):
             (b"not-a-png", "PNG_STRUCTURE"),
             (_png((0, 255, 0, 255), width=2), "PNG_DECLARATION_MISMATCH"),
             (_png((0, 255, 0, 255), srgb=False), "PNG_SRGB_REQUIRED"),
+            (_png((0, 255), color_type=4, plte=b"\x00\x00\x00"), "PNG_STRUCTURE"),
         )
         for png_payload, code in cases:
             with self.subTest(code=code):
