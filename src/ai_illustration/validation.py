@@ -15,18 +15,16 @@ from .models import Diagnostic, Manifest, load_manifest
 from .naming import SHA256_RE, TOKEN_RE, VERSION_RE, export_paths, safe_relative_path
 
 KINDS = {
-    "character-spec",
-    "style-profile",
-    "generation-request",
-    "candidate-asset",
-    "review-decision",
-    "export-manifest",
+    "character-spec", "style-profile", "generation-request",
+    "candidate-asset", "review-decision", "export-manifest",
 }
 LICENSE_STATES = {"unreviewed", "reviewing", "approved", "rejected"}
 REVIEW_STATES = {"shortlist", "accept", "reject", "needs_revision"}
 ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 REF_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*@v[0-9]{3}$")
 UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+MAX_PNG_DECOMPRESSED_BYTES = 128 * 1024 * 1024
 
 REQUIRED: dict[str, tuple[str, ...]] = {
     "character-spec": (
@@ -60,7 +58,6 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     ),
 }
 OPTIONAL = {"seed", "notes", "supersedes", "observed_sha256", "tool_version"}
-PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 @dataclass(frozen=True)
@@ -93,13 +90,10 @@ def validate_document(manifest: Manifest) -> list[Diagnostic]:
 
     unknown = sorted(set(data) - set(REQUIRED[kind]) - OPTIONAL)
     if unknown:
-        diagnostics.append(
-            _diagnostic(
-                manifest,
-                "UNKNOWN_FIELD",
-                f"unknown fields are not accepted: {', '.join(unknown)}",
-            )
-        )
+        diagnostics.append(_diagnostic(
+            manifest, "UNKNOWN_FIELD",
+            f"unknown fields are not accepted: {', '.join(unknown)}",
+        ))
     for field in REQUIRED[kind]:
         if field not in data:
             diagnostics.append(_diagnostic(manifest, "MISSING_FIELD", "required field is missing", field))
@@ -201,13 +195,9 @@ def validate_document(manifest: Manifest) -> list[Diagnostic]:
             try:
                 character_id, _ = _split_versioned_ref(data["character_ref"])
                 expected_path, expected_sidecar = export_paths(
-                    character_id=character_id,
-                    crop=data["crop"],
-                    facing=data["facing"],
-                    pose=data["pose"],
-                    expression=data["expression"],
-                    version=data["version"],
-                    sha256=data["sha256"],
+                    character_id=character_id, crop=data["crop"], facing=data["facing"],
+                    pose=data["pose"], expression=data["expression"],
+                    version=data["version"], sha256=data["sha256"],
                 )
                 if data["path"] != expected_path:
                     diagnostics.append(_diagnostic(manifest, "NONDETERMINISTIC_PATH", f"expected {expected_path}", "path"))
@@ -236,9 +226,9 @@ def _parse_png(data: bytes) -> PngInfo:
     if not data.startswith(PNG_SIGNATURE):
         raise ValueError("invalid PNG signature")
     offset = len(PNG_SIGNATURE)
-    width = height = color_type = -1
-    channels = -1
-    seen_ihdr = seen_idat = seen_iend = seen_srgb = False
+    width = height = channels = -1
+    seen_ihdr = seen_plte = seen_idat = seen_iend = seen_srgb = False
+    idat_closed = False
     idat = bytearray()
     chunk_index = 0
 
@@ -252,16 +242,18 @@ def _parse_png(data: bytes) -> PngInfo:
             raise ValueError("PNG chunk length exceeds file size")
         chunk_data = data[offset + 8:offset + 8 + length]
         stored_crc = int.from_bytes(data[offset + 8 + length:chunk_end], "big")
-        calculated_crc = zlib.crc32(chunk_type + chunk_data) & 0xFFFFFFFF
-        if stored_crc != calculated_crc:
+        if stored_crc != (zlib.crc32(chunk_type + chunk_data) & 0xFFFFFFFF):
             raise ValueError(f"invalid CRC for {chunk_type!r}")
         if not re.fullmatch(rb"[A-Za-z]{4}", chunk_type):
             raise ValueError("invalid PNG chunk type")
-
         if chunk_index == 0 and chunk_type != b"IHDR":
             raise ValueError("IHDR must be the first chunk")
         if seen_iend:
             raise ValueError("data appears after IEND")
+
+        if seen_idat and chunk_type not in {b"IDAT", b"IEND"}:
+            idat_closed = True
+
         if chunk_type == b"IHDR":
             if seen_ihdr or length != 13:
                 raise ValueError("PNG must contain exactly one 13-byte IHDR")
@@ -277,22 +269,30 @@ def _parse_png(data: bytes) -> PngInfo:
             if compression != 0 or filter_method != 0 or interlace != 0:
                 raise ValueError("unsupported PNG compression, filter, or interlace method")
             channels = 2 if color_type == 4 else 4
-        elif chunk_type == b"IDAT":
-            if not seen_ihdr:
-                raise ValueError("IDAT precedes IHDR")
-            seen_idat = True
-            idat.extend(chunk_data)
+        elif chunk_type == b"PLTE":
+            if seen_plte or seen_idat:
+                raise ValueError("PLTE must be unique and precede IDAT")
+            seen_plte = True
         elif chunk_type == b"sRGB":
+            if seen_srgb or seen_plte or seen_idat:
+                raise ValueError("sRGB must be unique and precede PLTE and IDAT")
             if length != 1 or chunk_data[0] > 3:
                 raise ValueError("invalid sRGB chunk")
             seen_srgb = True
+        elif chunk_type == b"IDAT":
+            if not seen_ihdr:
+                raise ValueError("IDAT precedes IHDR")
+            if idat_closed:
+                raise ValueError("IDAT chunks must be consecutive")
+            seen_idat = True
+            idat.extend(chunk_data)
         elif chunk_type == b"IEND":
             if length != 0 or not seen_idat:
                 raise ValueError("invalid IEND placement or length")
             seen_iend = True
             if chunk_end != len(data):
                 raise ValueError("trailing bytes after IEND")
-        elif chunk_type[:1].isupper() and chunk_type not in {b"PLTE"}:
+        elif chunk_type[:1].isupper():
             raise ValueError(f"unsupported critical PNG chunk {chunk_type!r}")
 
         offset = chunk_end
@@ -302,15 +302,27 @@ def _parse_png(data: bytes) -> PngInfo:
 
     if not (seen_ihdr and seen_idat and seen_iend):
         raise ValueError("PNG requires IHDR, IDAT, and IEND chunks")
+    row_size = 1 + width * channels
+    expected_size = row_size * height
+    if expected_size > MAX_PNG_DECOMPRESSED_BYTES:
+        raise ValueError("decompressed PNG exceeds the configured safety limit")
+
     decompressor = zlib.decompressobj()
+    output_limit = expected_size + 1
     try:
-        raw = decompressor.decompress(bytes(idat)) + decompressor.flush()
+        raw = bytearray(decompressor.decompress(bytes(idat), output_limit))
+        if len(raw) > expected_size or decompressor.unconsumed_tail:
+            raise ValueError("decompressed pixel data exceeds IHDR-derived size")
+        remaining = output_limit - len(raw)
+        if remaining > 0:
+            raw.extend(decompressor.flush(remaining))
     except zlib.error as exc:
         raise ValueError(f"IDAT decompression failed: {exc}") from exc
+    if len(raw) > expected_size:
+        raise ValueError("decompressed pixel data exceeds IHDR-derived size")
     if not decompressor.eof or decompressor.unused_data or decompressor.unconsumed_tail:
         raise ValueError("IDAT stream is incomplete or contains trailing compressed data")
-    row_size = 1 + width * channels
-    if len(raw) != row_size * height:
+    if len(raw) != expected_size:
         raise ValueError("decompressed pixel data length is inconsistent with IHDR")
     for row in range(height):
         if raw[row * row_size] > 4:
@@ -322,8 +334,7 @@ def _resolve_asset_path(root: Path, relative: Path) -> Path:
     candidate = root.joinpath(*relative.parts)
     if candidate.is_file():
         return candidate
-    repository_relative = Path.cwd().joinpath(*relative.parts)
-    return repository_relative
+    return Path.cwd().joinpath(*relative.parts)
 
 
 def _verify_png(manifest: Manifest, field: str, root: Path) -> list[Diagnostic]:
@@ -392,13 +403,11 @@ def validate_set(manifests: Iterable[Manifest], root: Path | None = None) -> lis
                     target = require(kind, identifier, manifest, field)
                     if target and target.data.get("version") != version:
                         diagnostics.append(_diagnostic(manifest, "VERSION_MISMATCH", f"{field} version does not match target", field))
-
         elif manifest.kind == "candidate-asset":
             if isinstance(data.get("request_ref"), str):
                 require("generation-request", data["request_ref"], manifest, "request_ref")
             if data.get("status") == "technically_valid":
                 diagnostics.extend(_verify_png(manifest, "path", root))
-
         elif manifest.kind == "review-decision":
             candidate = require("candidate-asset", data.get("candidate_ref", ""), manifest, "candidate_ref")
             if candidate:
@@ -408,7 +417,6 @@ def validate_set(manifests: Iterable[Manifest], root: Path | None = None) -> lis
                     diagnostics.append(_diagnostic(manifest, "REVIEW_SOURCE_MISMATCH", "review request must match candidate source request", "candidate_request_ref"))
                 if data.get("candidate_sha256") != candidate.data.get("sha256"):
                     diagnostics.append(_diagnostic(manifest, "REVIEW_CHECKSUM_MISMATCH", "review checksum must match candidate", "candidate_sha256"))
-
         elif manifest.kind == "export-manifest":
             candidate = require("candidate-asset", data.get("candidate_ref", ""), manifest, "candidate_ref")
             review = require("review-decision", data.get("review_ref", ""), manifest, "review_ref")
