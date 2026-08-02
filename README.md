@@ -4,11 +4,19 @@ Local-first development for a fixed two-woman manzai character illustration work
 
 ## Current capability
 
-The repository defines product, architecture, style, and asset contracts and includes a fixture-only manifest validation core. It does **not** install a model or generate production images.
+The repository defines product, architecture, style, and asset contracts and includes:
+
+- a fixture-only manifest validation core;
+- a deterministic local tool/hardware catalog;
+- a non-executing ComfyUI API-workflow adapter that validates workflows and creates dry-run execution plans.
+
+It does **not** install a model, start ComfyUI, contact a server, or generate production images.
 
 Six production manifest types are supported: character specification, style profile, generation request, candidate asset, review decision, and export manifest.
 
 The tool-evaluation catalog can validate synthetic tool/model profiles, list them deterministically, and compare declared hardware requirements with a local hardware profile. Compatibility never implies license or commercial-use approval.
+
+The ComfyUI adapter accepts only loopback HTTP endpoints, rejects credentials and secret-like values, binds only explicitly allowlisted workflow inputs, records deterministic workflow checksums, and always remains in dry-run mode.
 
 ## Run without installation
 
@@ -17,6 +25,8 @@ PYTHONPATH=src python -m ai_illustration.cli validate tests/fixtures/valid
 PYTHONPATH=src python -m ai_illustration.cli catalog-validate tests/fixtures/catalog/tool-profile.json
 PYTHONPATH=src python -m ai_illustration.cli catalog-list tests/fixtures/catalog/tool-profile.json
 PYTHONPATH=src python -m ai_illustration.cli catalog-compat tests/fixtures/catalog/tool-profile.json tests/fixtures/catalog/hardware-profile.json
+PYTHONPATH=src python -m ai_illustration.cli adapter-check tests/fixtures/comfyui/workflow-api.json
+PYTHONPATH=src python -m ai_illustration.cli adapter-plan tests/fixtures/valid/generation-request.json tests/fixtures/comfyui/workflow-api.json --bindings tests/fixtures/comfyui/bindings.json
 PYTHONPATH=src python -m unittest discover -s tests
 ```
 
@@ -32,4 +42,11 @@ The catalog distinguishes:
 - `missing-evidence`: hardware declarations pass but evidence or licensing review is incomplete;
 - `compatible-by-declaration`: declared hardware requirements pass and required evidence fields are present.
 
-No compatibility result grants a license or approves commercial use. No network request, image generation, model download, database, server, or hosted service is used.
+The adapter distinguishes planning from authorization:
+
+- every plan has `dry_run: true`;
+- unresolved model identifiers or non-approved model license state set `executable_ready: false`;
+- `execute()` is deliberately disabled;
+- no socket, subprocess, external request, model loading, or image output is performed.
+
+No compatibility or adapter result grants a license or approves commercial use.
