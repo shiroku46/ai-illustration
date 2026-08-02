@@ -2,6 +2,7 @@
 
 const state = { candidates: [], categories: [], decisions: [], selected: new Set() };
 const $ = (id) => document.getElementById(id);
+const APPROVAL_DECISIONS = new Set(["accept", "shortlist"]);
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -63,8 +64,7 @@ function candidateCard(candidate, compact = false) {
   }
   card.append(visual);
   card.append(element("h3", candidate.id));
-  const summary = element("p", `${candidate.character_id} / ${candidate.expression} / ${candidate.pose}`, "summary");
-  card.append(summary);
+  card.append(element("p", `${candidate.character_id} / ${candidate.expression} / ${candidate.pose}`, "summary"));
   if (!compact) {
     const toggle = element("button", state.selected.has(candidate.id) ? "比較から外す" : "比較する");
     toggle.type = "button";
@@ -98,6 +98,21 @@ function renderList() {
   $("status").textContent = `${candidates.length}件を表示中（全${state.candidates.length}件）`;
 }
 
+function selectedReviewCandidate() {
+  return state.candidates.find((item) => item.id === $("review-candidate").value);
+}
+
+function syncDecisionOptions() {
+  const candidate = selectedReviewCandidate();
+  const reviewable = candidate?.candidate_status === "technically_valid";
+  [...$("decision").options].forEach((item) => {
+    item.disabled = !reviewable && APPROVAL_DECISIONS.has(item.value);
+  });
+  if ($("decision").selectedOptions[0]?.disabled) {
+    $("decision").value = state.decisions.includes("needs_revision") ? "needs_revision" : "reject";
+  }
+}
+
 function renderComparison() {
   const grid = $("comparison-grid");
   grid.replaceChildren();
@@ -111,6 +126,7 @@ function renderComparison() {
   reviewCandidate.replaceChildren();
   selected.forEach((candidate) => reviewCandidate.append(option(candidate.id)));
   if (selected.some((item) => item.id === current)) reviewCandidate.value = current;
+  syncDecisionOptions();
 }
 
 function render() {
@@ -123,11 +139,14 @@ function utcTimestamp() {
 }
 
 function reviewDocument() {
-  const candidate = state.candidates.find((item) => item.id === $("review-candidate").value);
+  const candidate = selectedReviewCandidate();
   if (!candidate) throw new Error("比較ボードから対象候補を選んでください。");
   const reviewer = $("reviewer").value.trim();
   if (!reviewer) throw new Error("レビュアー名を入力してください。");
   const decision = $("decision").value;
+  if (APPROVAL_DECISIONS.has(decision) && candidate.candidate_status !== "technically_valid") {
+    throw new Error("採用または候補入りには technically_valid の候補が必要です。");
+  }
   const timestamp = utcTimestamp();
   const categories = [...document.querySelectorAll("#category-list input:checked")]
     .map((input) => input.value).sort();
@@ -188,6 +207,7 @@ async function initialize() {
   });
   ["character-filter", "role-filter", "expression-filter", "pose-filter", "review-filter"]
     .forEach((id) => $(id).addEventListener("change", render));
+  $("review-candidate").addEventListener("change", syncDecisionOptions);
   $("clear-selection").addEventListener("click", () => { state.selected.clear(); render(); });
   $("download-review").addEventListener("click", downloadReview);
   render();
