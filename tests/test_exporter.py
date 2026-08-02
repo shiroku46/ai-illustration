@@ -250,18 +250,38 @@ class ExporterTests(unittest.TestCase):
         output = self.root / "evaluation-claim"
         result = self._build(output, write=True)
         old_root = output / result["package_directory"]
-        malicious = copy.deepcopy(result["package"])
-        item = malicious["items"][0]
-        item["variant_review_ref"] = "variant-review-" + "0" * 20
-        item["variant_review_path"] = f"reviews/{item['variant_id']}.json"
-        item["variant_review_sha256"] = "0" * 64
-        core = {key: value for key, value in malicious.items() if key != "id"}
-        malicious["id"] = content_identifier("variant-export-package", core, 20)
-        new_root = output / malicious["id"]
-        shutil.copytree(old_root, new_root)
-        _write_canonical(new_root / "package-manifest.json", malicious)
+
+        malicious_item_package = copy.deepcopy(result["package"])
+        malicious_item = malicious_item_package["items"][0]
+        malicious_item["variant_review_ref"] = "variant-review-" + "0" * 20
+        malicious_item["variant_review_path"] = f"reviews/{malicious_item['variant_id']}.json"
+        malicious_item["variant_review_sha256"] = "0" * 64
+        item_core = {key: value for key, value in malicious_item_package.items() if key != "id"}
+        malicious_item_package["id"] = content_identifier("variant-export-package", item_core, 20)
+        item_root = output / malicious_item_package["id"]
+        shutil.copytree(old_root, item_root)
+        _write_canonical(item_root / "package-manifest.json", malicious_item_package)
         with self.assertRaisesRegex(ExportError, "EVALUATION_REVIEW_CLAIM"):
-            check_export_package(new_root / "package-manifest.json", output)
+            check_export_package(item_root / "package-manifest.json", output)
+
+        malicious_sidecar_package = copy.deepcopy(result["package"])
+        sidecar_item = malicious_sidecar_package["items"][0]
+        sidecar_path = old_root / sidecar_item["sidecar_path"]
+        malicious_sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        malicious_sidecar["variant_review_ref"] = "variant-review-" + "0" * 20
+        malicious_sidecar["variant_review_path"] = f"reviews/{sidecar_item['variant_id']}.json"
+        malicious_sidecar["variant_review_sha256"] = "0" * 64
+        malicious_sidecar["variant_reviewer"] = "attacker"
+        malicious_sidecar_payload = canonical_json(malicious_sidecar) + b"\n"
+        sidecar_item["sidecar_sha256"] = hashlib.sha256(malicious_sidecar_payload).hexdigest()
+        sidecar_core = {key: value for key, value in malicious_sidecar_package.items() if key != "id"}
+        malicious_sidecar_package["id"] = content_identifier("variant-export-package", sidecar_core, 20)
+        sidecar_root = output / malicious_sidecar_package["id"]
+        shutil.copytree(old_root, sidecar_root)
+        (sidecar_root / sidecar_item["sidecar_path"]).write_bytes(malicious_sidecar_payload)
+        _write_canonical(sidecar_root / "package-manifest.json", malicious_sidecar_package)
+        with self.assertRaisesRegex(ExportError, "EVALUATION_REVIEW_CLAIM"):
+            check_export_package(sidecar_root / "package-manifest.json", output)
 
     def test_missing_extra_malformed_dimension_srgb_and_alpha_fail_closed(self) -> None:
         first_id = self.variant_set["variants"][0]["id"]
