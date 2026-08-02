@@ -87,7 +87,7 @@ SIDECAR_BASE_FIELDS = {
 }
 
 
-@dataclass(frozen=True)
+@dataclass
 class ExportError(ValueError):
     code: str
     message: str
@@ -223,6 +223,13 @@ def _validate_package_schema(package: dict[str, Any], field: str) -> None:
 
 def _validate_sidecar_schema(sidecar: dict[str, Any], field: str) -> None:
     intent = sidecar.get("intent")
+    review_fields = {name for name in VARIANT_REVIEW_SIDECAR_FIELDS if name in sidecar}
+    if intent == "evaluation" and review_fields:
+        raise ExportError(
+            "EVALUATION_REVIEW_CLAIM",
+            "evaluation sidecar must not contain variant approval fields",
+            field,
+        )
     expected_fields = SIDECAR_BASE_FIELDS | (
         set(VARIANT_REVIEW_SIDECAR_FIELDS) if intent == "production" else set()
     )
@@ -667,15 +674,15 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
     for item in items:
         if not isinstance(item, dict):
             raise ExportError("PACKAGE_ITEM", "package item must be an object", "items")
-        expected_item_fields = ITEM_BASE_FIELDS | (
-            set(VARIANT_REVIEW_BINDING_FIELDS) if production else set()
-        )
-        _require_exact_fields(item, expected_item_fields, "PACKAGE_ITEM", "items")
         present_review_fields = {field for field in VARIANT_REVIEW_SIDECAR_FIELDS if field in item}
         if production and present_review_fields != set(VARIANT_REVIEW_BINDING_FIELDS):
             raise ExportError("PRODUCTION_VARIANT_REVIEW_REQUIRED", "production package item lacks complete variant review binding", "items")
         if not production and present_review_fields:
             raise ExportError("EVALUATION_REVIEW_CLAIM", "evaluation package must not contain variant approval fields", "items")
+        expected_item_fields = ITEM_BASE_FIELDS | (
+            set(VARIANT_REVIEW_BINDING_FIELDS) if production else set()
+        )
+        _require_exact_fields(item, expected_item_fields, "PACKAGE_ITEM", "items")
 
         item_payloads: dict[str, bytes] = {}
         normalized_paths: dict[str, str] = {}
@@ -707,15 +714,6 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
         sidecar_path = normalized_paths["sidecar_path"]
         sidecar = _load_object_bytes(item_payloads["sidecar_path"], sidecar_path)
         _validate_sidecar_schema(sidecar, sidecar_path)
-        sidecar_review_fields = {
-            field for field in VARIANT_REVIEW_SIDECAR_FIELDS if field in sidecar
-        }
-        if not production and sidecar_review_fields:
-            raise ExportError(
-                "EVALUATION_REVIEW_CLAIM",
-                "evaluation sidecar must not contain variant approval fields",
-                sidecar_path,
-            )
         sidecar_checks = {
             "variant_set_ref": package["variant_set_ref"],
             "variant_id": variant_id,
