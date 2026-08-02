@@ -17,16 +17,9 @@ from .models import Manifest, load_manifest
 from .validation import _parse_png, validate_document
 
 REVIEW_CATEGORIES = (
-    "line_uniformity",
-    "contour_overclean",
-    "excessive_symmetry",
-    "generic_eyes",
-    "hand_defect",
-    "repeated_face_template",
-    "gradient_overuse",
-    "mechanical_anatomy",
-    "identity_drift",
-    "other",
+    "line_uniformity", "contour_overclean", "excessive_symmetry", "generic_eyes",
+    "hand_defect", "repeated_face_template", "gradient_overuse", "mechanical_anatomy",
+    "identity_drift", "other",
 )
 DECISIONS = {"shortlist", "accept", "reject", "needs_revision"}
 ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -45,7 +38,18 @@ class ReviewUIError(ValueError):
 @dataclass(frozen=True)
 class CandidateView:
     payload: dict[str, Any]
-    asset_path: Path | None
+    asset_root: Path
+    asset_spec: dict[str, Any]
+
+    def read_verified_asset(self) -> bytes | None:
+        """Re-resolve and revalidate bytes for every response to prevent replacement races."""
+        path = _verified_asset(self.asset_root, self.asset_spec)
+        if path is None:
+            return None
+        try:
+            return path.read_bytes()
+        except OSError:
+            return None
 
 
 @dataclass(frozen=True)
@@ -94,8 +98,14 @@ def _read_manifests(root: Path) -> list[Manifest]:
     diagnostics: list[str] = []
     for path in sorted(root.rglob("*.json")):
         try:
-            manifest = load_manifest(path)
-        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            if path.is_symlink():
+                raise ReviewUIError("symlinked manifest files are rejected")
+            resolved = path.resolve(strict=True)
+            resolved.relative_to(root)
+            if not resolved.is_file():
+                raise ReviewUIError("manifest path is not a regular file")
+            manifest = load_manifest(resolved)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError, ReviewUIError) as exc:
             diagnostics.append(f"{path}: {exc}")
             continue
         if manifest.kind not in {"character-spec", "generation-request", "candidate-asset", "review-decision"}:
@@ -134,7 +144,6 @@ def load_review_data(manifest_root: Path, asset_root: Path) -> ReviewData:
     asset_root = asset_root.resolve(strict=True)
     if not asset_root.is_dir():
         raise ReviewUIError("asset root must be a directory")
-
     indexes: dict[str, dict[str, Manifest]] = {
         kind: {} for kind in ("character-spec", "generation-request", "candidate-asset")
     }
@@ -158,48 +167,29 @@ def load_review_data(manifest_root: Path, asset_root: Path) -> ReviewData:
         character = indexes["character-spec"].get(character_id)
         if character is None:
             raise ReviewUIError(f"request {request.manifest_id} has no character specification")
-        prior = sorted(
-            reviews.get(candidate_id, []),
-            key=lambda item: (str(item.get("timestamp", "")), str(item.get("id", ""))),
-        )
-        asset = _verified_asset(asset_root, candidate)
+        prior = sorted(reviews.get(candidate_id, []), key=lambda item: (str(item.get("timestamp", "")), str(item.get("id", ""))))
+        available = _verified_asset(asset_root, candidate) is not None
         payload = {
-            "id": candidate_id,
-            "request_id": request.manifest_id,
-            "character_id": character_id,
-            "role": character.data.get("role"),
-            "pose": request.data.get("pose"),
-            "expression": request.data.get("expression"),
-            "crop": request.data.get("crop"),
-            "facing": request.data.get("facing"),
-            "tool_id": request.data.get("tool_id"),
-            "model_id": request.data.get("model_id"),
-            "license_status": request.data.get("license_status"),
-            "candidate_status": candidate.get("status"),
-            "sha256": candidate.get("sha256"),
-            "width": candidate.get("width"),
-            "height": candidate.get("height"),
-            "color_space": candidate.get("color_space"),
-            "has_alpha": candidate.get("has_alpha"),
-            "provenance": candidate.get("provenance"),
-            "image_available": asset is not None,
-            "image_url": f"/assets/{candidate_id}" if asset is not None else None,
-            "reviews": prior,
+            "id": candidate_id, "request_id": request.manifest_id, "character_id": character_id,
+            "role": character.data.get("role"), "pose": request.data.get("pose"),
+            "expression": request.data.get("expression"), "crop": request.data.get("crop"),
+            "facing": request.data.get("facing"), "tool_id": request.data.get("tool_id"),
+            "model_id": request.data.get("model_id"), "license_status": request.data.get("license_status"),
+            "candidate_status": candidate.get("status"), "sha256": candidate.get("sha256"),
+            "width": candidate.get("width"), "height": candidate.get("height"),
+            "color_space": candidate.get("color_space"), "has_alpha": candidate.get("has_alpha"),
+            "provenance": candidate.get("provenance"), "image_available": available,
+            "image_url": f"/assets/{candidate_id}" if available else None, "reviews": prior,
             "review_state": prior[-1]["decision"] if prior else "unreviewed",
         }
-        candidates.append(CandidateView(payload, asset))
+        candidates.append(CandidateView(payload, asset_root, dict(candidate)))
     candidates.sort(key=lambda item: item.payload["id"])
     return ReviewData(tuple(candidates))
 
 
 def make_review_decision(
-    candidate: dict[str, Any],
-    *,
-    decision: str,
-    reviewer: str,
-    categories: list[str],
-    notes: str = "",
-    timestamp: str | None = None,
+    candidate: dict[str, Any], *, decision: str, reviewer: str, categories: list[str],
+    notes: str = "", timestamp: str | None = None,
 ) -> dict[str, Any]:
     if decision not in DECISIONS:
         raise ReviewUIError("unsupported review decision")
@@ -210,30 +200,19 @@ def make_review_decision(
     timestamp = timestamp or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     if not UTC_RE.fullmatch(timestamp):
         raise ReviewUIError("timestamp must be UTC YYYY-MM-DDTHH:MM:SSZ")
-    candidate_id = str(candidate["id"])
-    request_id = str(candidate["request_id"])
-    checksum = str(candidate["sha256"])
+    candidate_id, request_id, checksum = str(candidate["id"]), str(candidate["request_id"]), str(candidate["sha256"])
     if not ID_RE.fullmatch(candidate_id) or not ID_RE.fullmatch(request_id):
         raise ReviewUIError("candidate/request ids are invalid")
-    suffix = hashlib.sha256(
-        f"{candidate_id}\n{decision}\n{timestamp}\n{checksum}".encode("utf-8")
-    ).hexdigest()[:12]
+    suffix = hashlib.sha256(f"{candidate_id}\n{decision}\n{timestamp}\n{checksum}".encode()).hexdigest()[:12]
     output: dict[str, Any] = {
-        "kind": "review-decision",
-        "schema_version": "1.0",
-        "id": f"review-{candidate_id}-{suffix}",
-        "candidate_ref": candidate_id,
-        "candidate_request_ref": request_id,
-        "candidate_sha256": checksum,
-        "decision": decision,
-        "reviewer": reviewer.strip(),
-        "timestamp": timestamp,
+        "kind": "review-decision", "schema_version": "1.0", "id": f"review-{candidate_id}-{suffix}",
+        "candidate_ref": candidate_id, "candidate_request_ref": request_id, "candidate_sha256": checksum,
+        "decision": decision, "reviewer": reviewer.strip(), "timestamp": timestamp,
         "categories": sorted(set(categories)),
     }
     if notes.strip():
         output["notes"] = notes.strip()
-    errors = validate_document(Manifest(Path("download.json"), output))
-    if errors:
+    if validate_document(Manifest(Path("download.json"), output)):
         raise ReviewUIError("generated review decision did not validate")
     return output
 
@@ -281,31 +260,21 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         if path in STATIC_FILES:
             filename, content_type = STATIC_FILES[path]
             try:
-                file_path = resolve_beneath(self.server.static_root, filename, require_file=True)
-                payload = file_path.read_bytes()
+                payload = resolve_beneath(self.server.static_root, filename, require_file=True).read_bytes()
             except (ReviewUIError, OSError):
                 self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"not found", head=head)
                 return
             self._send(HTTPStatus.OK, content_type, payload, head=head)
             return
         if path == "/api/candidates":
-            payload = json.dumps(
-                self.server.review_data.public_payload(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
-            ).encode("utf-8")
+            payload = json.dumps(self.server.review_data.public_payload(), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
             self._send(HTTPStatus.OK, "application/json; charset=utf-8", payload, head=head)
             return
         if path.startswith("/assets/"):
             candidate_id = path[len("/assets/"):]
-            if not ID_RE.fullmatch(candidate_id):
-                self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"not found", head=head)
-                return
-            candidate = self.server.review_data.by_id(candidate_id)
-            if candidate is None or candidate.asset_path is None:
-                self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"not found", head=head)
-                return
-            try:
-                payload = candidate.asset_path.read_bytes()
-            except OSError:
+            candidate = self.server.review_data.by_id(candidate_id) if ID_RE.fullmatch(candidate_id) else None
+            payload = candidate.read_verified_asset() if candidate else None
+            if payload is None:
                 self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"not found", head=head)
                 return
             self._send(HTTPStatus.OK, "image/png", payload, head=head)
