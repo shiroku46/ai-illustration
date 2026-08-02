@@ -474,7 +474,7 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
     for item in items:
         if not isinstance(item, dict):
             raise ExportError("PACKAGE_ITEM", "package item must be an object", "items")
-        present_review_fields = {field for field in VARIANT_REVIEW_BINDING_FIELDS if field in item}
+        present_review_fields = {field for field in VARIANT_REVIEW_SIDECAR_FIELDS if field in item}
         if production and present_review_fields != set(VARIANT_REVIEW_BINDING_FIELDS):
             raise ExportError("PRODUCTION_VARIANT_REVIEW_REQUIRED", "production package item lacks complete variant review binding", "items")
         if not production and present_review_fields:
