@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import shutil
 import tempfile
 from typing import Any
@@ -17,6 +17,16 @@ from .variants import check_variant_set
 
 PACKAGE_MANIFEST = "package-manifest.json"
 PAPER_THEATER_INDEX = "paper-theater-index.json"
+VARIANT_REVIEW_FIELDS = {
+    "id",
+    "kind",
+    "schema_version",
+    "variant_set_ref",
+    "variant_id",
+    "png_sha256",
+    "decision",
+    "reviewer",
+}
 
 
 @dataclass(frozen=True)
@@ -71,6 +81,10 @@ def _is_within(root: Path, candidate: Path) -> bool:
     return True
 
 
+def _overlap(left: Path, right: Path) -> bool:
+    return left == right or _is_within(left, right) or _is_within(right, left)
+
+
 def _safe_join(root: Path, relative: str, field: str) -> Path:
     try:
         rel = safe_relative_path(relative)
@@ -83,22 +97,22 @@ def _safe_join(root: Path, relative: str, field: str) -> Path:
     return candidate
 
 
-def _scan_source(root: Path, expected_names: set[str]) -> dict[str, Path]:
+def _scan_flat_files(root: Path, expected_names: set[str], *, label: str) -> dict[str, Path]:
     found: dict[str, Path] = {}
     for path in root.rglob("*"):
         if path.is_symlink():
-            raise ExportError("SOURCE_SYMLINK", "source tree must not contain symlinks", str(path))
+            raise ExportError(f"{label.upper()}_SYMLINK", f"{label} tree must not contain symlinks", str(path))
         if not path.is_file():
             continue
         relative = path.relative_to(root).as_posix()
         if "/" in relative or relative not in expected_names:
-            raise ExportError("EXTRA_SOURCE_FILE", f"unexpected source file: {relative}", relative)
+            raise ExportError(f"EXTRA_{label.upper()}_FILE", f"unexpected {label} file: {relative}", relative)
         if relative in found:
-            raise ExportError("DUPLICATE_SOURCE", f"duplicate source file: {relative}", relative)
+            raise ExportError(f"DUPLICATE_{label.upper()}", f"duplicate {label} file: {relative}", relative)
         found[relative] = path
     missing = sorted(expected_names - set(found))
     if missing:
-        raise ExportError("SOURCE_MISSING", "missing source PNG(s): " + ", ".join(missing), "source_root")
+        raise ExportError(f"{label.upper()}_MISSING", f"missing {label} file(s): " + ", ".join(missing), f"{label}_root")
     return found
 
 
@@ -127,6 +141,42 @@ def _verify_supplied_png(path: Path, variant: dict[str, Any]) -> tuple[bytes, st
     return payload, actual_sha
 
 
+def _validate_variant_review(
+    path: Path,
+    *,
+    variant_set_id: str,
+    variant_id: str,
+    png_sha256: str,
+) -> dict[str, str]:
+    review = _load_object(path)
+    if set(review) != VARIANT_REVIEW_FIELDS:
+        missing = sorted(VARIANT_REVIEW_FIELDS - set(review))
+        extra = sorted(set(review) - VARIANT_REVIEW_FIELDS)
+        raise ExportError("VARIANT_REVIEW_FIELDS", f"missing={missing}; extra={extra}", path.name)
+    if review.get("kind") != "variant-review-decision" or review.get("schema_version") != "1.0":
+        raise ExportError("VARIANT_REVIEW_SCHEMA", "invalid variant review kind or schema version", path.name)
+    if review.get("variant_set_ref") != variant_set_id or review.get("variant_id") != variant_id:
+        raise ExportError("VARIANT_REVIEW_REFERENCE", "variant review does not bind this variant set and ID", path.name)
+    if review.get("png_sha256") != png_sha256:
+        raise ExportError("VARIANT_REVIEW_CHECKSUM", "variant review checksum does not bind supplied PNG bytes", path.name)
+    if review.get("decision") != "accept":
+        raise ExportError("VARIANT_REVIEW_NOT_ACCEPTED", "production variant review must be accept", path.name)
+    reviewer = review.get("reviewer")
+    if not isinstance(reviewer, str) or not reviewer.strip() or len(reviewer) > 200:
+        raise ExportError("VARIANT_REVIEWER", "variant reviewer must be a non-empty bounded string", path.name)
+    identifier = review.get("id")
+    core = {key: value for key, value in review.items() if key != "id"}
+    expected_id = content_identifier("variant-review", core, 20)
+    if identifier != expected_id:
+        raise ExportError("VARIANT_REVIEW_ID", f"expected canonical review ID {expected_id}", path.name)
+    payload = _json_bytes(review)
+    return {
+        "variant_review_ref": identifier,
+        "variant_review_sha256": _sha(payload),
+        "variant_reviewer": reviewer,
+    }
+
+
 def _inventory_files(root: Path) -> dict[str, bytes]:
     inventory: dict[str, bytes] = {}
     if root.is_symlink() or not root.is_dir():
@@ -135,7 +185,10 @@ def _inventory_files(root: Path) -> dict[str, bytes]:
         if path.is_symlink():
             raise ExportError("PACKAGE_SYMLINK", "package must not contain symlinks", str(path))
         if path.is_file():
-            inventory[path.relative_to(root).as_posix()] = path.read_bytes()
+            try:
+                inventory[path.relative_to(root).as_posix()] = path.read_bytes()
+            except OSError as exc:
+                raise ExportError("PACKAGE_READ_ERROR", str(exc), str(path)) from exc
     return inventory
 
 
@@ -150,13 +203,31 @@ def build_export_package(
     source_root: Path,
     output_root: Path,
     *,
+    approval_root: Path | None = None,
     write: bool = False,
 ) -> dict[str, Any]:
     variant_set = check_variant_set(variant_set_path, manifest_root)
+    manifests = _resolved_directory(manifest_root, must_exist=True, field="manifest_root")
     source = _resolved_directory(source_root, must_exist=True, field="source_root")
     output = _resolved_directory(output_root, must_exist=False, field="output_root")
-    if source == output or _is_within(source, output) or _is_within(output, source):
-        raise ExportError("ROOT_OVERLAP", "source and output roots must not overlap", "output_root")
+    if _overlap(source, output) or _overlap(manifests, output):
+        raise ExportError("ROOT_OVERLAP", "output root must not overlap source or manifest roots", "output_root")
+
+    production = variant_set.get("intent") == "production"
+    approvals: dict[str, Path] = {}
+    approval_path: Path | None = None
+    if production:
+        if approval_root is None:
+            raise ExportError(
+                "PRODUCTION_VARIANT_REVIEW_REQUIRED",
+                "production export requires an approval root with one exact byte-bound accept review per variant",
+                "approval_root",
+            )
+        approval_path = _resolved_directory(approval_root, must_exist=True, field="approval_root")
+        if _overlap(approval_path, output):
+            raise ExportError("ROOT_OVERLAP", "approval and output roots must not overlap", "output_root")
+    elif approval_root is not None:
+        raise ExportError("APPROVAL_ROOT_NOT_ALLOWED", "approval root is accepted only for production exports", "approval_root")
 
     variants = variant_set.get("variants")
     if not isinstance(variants, list) or not variants:
@@ -171,8 +242,14 @@ def build_export_package(
     sidecar_paths = [str(item.get("sidecar_path", "")) for item in variants]
     _ensure_unique(png_paths + sidecar_paths, "OUTPUT_PATH_COLLISION", "output paths")
 
-    expected_source_names = {f"{identifier}.png" for identifier in variant_ids}
-    source_files = _scan_source(source, expected_source_names)
+    source_files = _scan_flat_files(source, {f"{identifier}.png" for identifier in variant_ids}, label="source")
+    if production and approval_path is not None:
+        approvals = _scan_flat_files(
+            approval_path,
+            {f"{identifier}.json" for identifier in variant_ids},
+            label="approval",
+        )
+
     file_payloads: dict[str, bytes] = {}
     items: list[dict[str, Any]] = []
     index_entries: list[dict[str, Any]] = []
@@ -183,6 +260,14 @@ def build_export_package(
         png_payload, png_sha = _verify_supplied_png(source_files[source_name], variant)
         png_path = str(safe_relative_path(variant["path"]))
         sidecar_path = str(safe_relative_path(variant["sidecar_path"]))
+        review_binding: dict[str, str] = {}
+        if production:
+            review_binding = _validate_variant_review(
+                approvals[f"{identifier}.json"],
+                variant_set_id=variant_set["id"],
+                variant_id=identifier,
+                png_sha256=png_sha,
+            )
         sidecar = {
             "kind": "variant-export-sidecar",
             "schema_version": "1.0",
@@ -210,6 +295,7 @@ def build_export_package(
                 "method": "verified-byte-copy",
                 "source_candidate_sha256": variant_set["source_candidate_sha256"],
             },
+            **review_binding,
         }
         sidecar_payload = _json_bytes(sidecar)
         file_payloads[png_path] = png_payload
@@ -221,6 +307,7 @@ def build_export_package(
             "png_sha256": png_sha,
             "sidecar_path": sidecar_path,
             "sidecar_sha256": _sha(sidecar_payload),
+            **{key: value for key, value in review_binding.items() if key != "variant_reviewer"},
         }
         items.append(item)
         index_entries.append({
@@ -264,14 +351,13 @@ def build_export_package(
     package_payload = _json_bytes(package)
     file_payloads[PACKAGE_MANIFEST] = package_payload
 
-    relative_files = sorted(file_payloads)
     result = {
         "ok": True,
         "write": write,
         "package_directory": package["id"],
         "package": package,
         "paper_theater_index": index,
-        "files": relative_files,
+        "files": sorted(file_payloads),
         "published": False,
         "idempotent": False,
     }
@@ -337,15 +423,26 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
     items = package.get("items")
     if not isinstance(items, list) or not items:
         raise ExportError("PACKAGE_ITEMS", "package items must be a non-empty list", "items")
+    production = package.get("intent") == "production"
     for item in items:
         if not isinstance(item, dict):
             raise ExportError("PACKAGE_ITEM", "package item must be an object", "items")
+        if production:
+            review_ref = item.get("variant_review_ref")
+            review_sha = item.get("variant_review_sha256")
+            if not isinstance(review_ref, str) or not TOKEN_RE.fullmatch(review_ref):
+                raise ExportError("PRODUCTION_VARIANT_REVIEW_REQUIRED", "production package item lacks variant review reference", "variant_review_ref")
+            if not isinstance(review_sha, str) or not SHA256_RE.fullmatch(review_sha):
+                raise ExportError("PRODUCTION_VARIANT_REVIEW_REQUIRED", "production package item lacks variant review checksum", "variant_review_sha256")
         for path_field, sha_field in (("png_path", "png_sha256"), ("sidecar_path", "sidecar_sha256")):
             path = item.get(path_field)
             expected_sha = item.get(sha_field)
             if not isinstance(path, str) or not isinstance(expected_sha, str) or not SHA256_RE.fullmatch(expected_sha):
                 raise ExportError("PACKAGE_ITEM_REFERENCE", "invalid package item reference", path_field)
-            safe_relative_path(path)
+            try:
+                safe_relative_path(path)
+            except (TypeError, ValueError) as exc:
+                raise ExportError("UNSAFE_PATH", str(exc), path_field) from exc
             payload = inventory.get(path)
             if payload is None or _sha(payload) != expected_sha:
                 raise ExportError("PACKAGE_FILE_MISMATCH", f"missing or modified file: {path}", path)
