@@ -102,9 +102,13 @@ function selectedReviewCandidate() {
   return state.candidates.find((item) => item.id === $("review-candidate").value);
 }
 
+function canApprove(candidate) {
+  return candidate?.candidate_status === "technically_valid" && candidate?.image_available === true;
+}
+
 function syncDecisionOptions() {
   const candidate = selectedReviewCandidate();
-  const reviewable = candidate?.candidate_status === "technically_valid";
+  const reviewable = canApprove(candidate);
   [...$("decision").options].forEach((item) => {
     item.disabled = !reviewable && APPROVAL_DECISIONS.has(item.value);
   });
@@ -144,8 +148,8 @@ function reviewDocument() {
   const reviewer = $("reviewer").value.trim();
   if (!reviewer) throw new Error("レビュアー名を入力してください。");
   const decision = $("decision").value;
-  if (APPROVAL_DECISIONS.has(decision) && candidate.candidate_status !== "technically_valid") {
-    throw new Error("採用または候補入りには technically_valid の候補が必要です。");
+  if (APPROVAL_DECISIONS.has(decision) && !canApprove(candidate)) {
+    throw new Error("採用または候補入りには technically_valid かつ検証済み画像の候補が必要です。");
   }
   const timestamp = utcTimestamp();
   const categories = [...document.querySelectorAll("#category-list input:checked")]
