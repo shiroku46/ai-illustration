@@ -42,7 +42,6 @@ class CandidateView:
     asset_spec: dict[str, Any]
 
     def read_verified_asset(self) -> bytes | None:
-        """Re-resolve and revalidate bytes for every response to prevent replacement races."""
         path = _verified_asset(self.asset_root, self.asset_spec)
         if path is None:
             return None
@@ -73,7 +72,6 @@ def _static_root() -> Path:
 
 
 def resolve_beneath(root: Path, relative: str, *, require_file: bool = False) -> Path:
-    """Resolve one POSIX relative path beneath root, rejecting traversal/symlink escape."""
     if not isinstance(relative, str) or not relative or "\\" in relative or "\x00" in relative:
         raise ReviewUIError("path must be a non-empty POSIX relative path")
     pure = PurePosixPath(relative)
@@ -127,16 +125,28 @@ def _verified_asset(asset_root: Path, candidate: dict[str, Any]) -> Path | None:
         if path.suffix.lower() != ".png" or hashlib.sha256(payload).hexdigest() != candidate["sha256"]:
             return None
         info = _parse_png(payload)
-        if (
-            info.width != candidate["width"]
-            or info.height != candidate["height"]
-            or not info.has_alpha
-            or not info.has_srgb
-        ):
+        if info.width != candidate["width"] or info.height != candidate["height"] or not info.has_alpha or not info.has_srgb:
             return None
         return path
     except (KeyError, OSError, ReviewUIError, ValueError):
         return None
+
+
+def _validated_prior_reviews(
+    candidate_id: str,
+    candidate: dict[str, Any],
+    request_id: str,
+    reviews: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    prior = reviews.get(candidate_id, [])
+    for review in prior:
+        if review.get("candidate_request_ref") != request_id:
+            raise ReviewUIError(f"review {review.get('id', '')} does not bind the current source request")
+        if review.get("candidate_sha256") != candidate.get("sha256"):
+            raise ReviewUIError(f"review {review.get('id', '')} does not bind the current candidate checksum")
+        if review.get("decision") in {"accept", "shortlist"} and candidate.get("status") != "technically_valid":
+            raise ReviewUIError(f"review {review.get('id', '')} approves a candidate that is not technically valid")
+    return sorted(prior, key=lambda item: (str(item.get("timestamp", "")), str(item.get("id", ""))))
 
 
 def load_review_data(manifest_root: Path, asset_root: Path) -> ReviewData:
@@ -159,7 +169,8 @@ def load_review_data(manifest_root: Path, asset_root: Path) -> ReviewData:
     candidates: list[CandidateView] = []
     for candidate_id, manifest in indexes["candidate-asset"].items():
         candidate = manifest.data
-        request = indexes["generation-request"].get(str(candidate.get("request_ref", "")))
+        request_id = str(candidate.get("request_ref", ""))
+        request = indexes["generation-request"].get(request_id)
         if request is None:
             raise ReviewUIError(f"candidate {candidate_id} has no source request")
         character_ref = str(request.data.get("character_ref", ""))
@@ -167,7 +178,7 @@ def load_review_data(manifest_root: Path, asset_root: Path) -> ReviewData:
         character = indexes["character-spec"].get(character_id)
         if character is None:
             raise ReviewUIError(f"request {request.manifest_id} has no character specification")
-        prior = sorted(reviews.get(candidate_id, []), key=lambda item: (str(item.get("timestamp", "")), str(item.get("id", ""))))
+        prior = _validated_prior_reviews(candidate_id, candidate, request_id, reviews)
         available = _verified_asset(asset_root, candidate) is not None
         payload = {
             "id": candidate_id, "request_id": request.manifest_id, "character_id": character_id,
@@ -232,7 +243,7 @@ class ReviewHTTPServer(ThreadingHTTPServer):
 class ReviewRequestHandler(BaseHTTPRequestHandler):
     server: ReviewHTTPServer
 
-    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+    def log_message(self, format: str, *args: object) -> None:
         return
 
     def _headers(self, status: int, content_type: str, length: int = 0) -> None:
@@ -281,10 +292,10 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             return
         self._send(HTTPStatus.NOT_FOUND, "text/plain; charset=utf-8", b"not found", head=head)
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         self._serve()
 
-    def do_HEAD(self) -> None:  # noqa: N802
+    def do_HEAD(self) -> None:
         self._serve(head=True)
 
     def _method_not_allowed(self) -> None:
