@@ -24,5 +24,20 @@
     "license_evidence_state": {"enum": ["unreviewed", "reviewing", "approved", "rejected"]},
     "commercial_use_review_state": {"enum": ["unreviewed", "reviewing", "approved", "rejected"]},
     "decision_state": {"enum": ["unreviewed", "reviewing", "approved", "rejected"]}
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"decision_state": {"const": "approved"}},
+        "required": ["decision_state"]
+      },
+      "then": {
+        "properties": {
+          "license_evidence_state": {"const": "approved"},
+          "commercial_use_review_state": {"const": "approved"}
+        },
+        "required": ["license_evidence_state", "commercial_use_review_state"]
+      }
+    }
+  ]
 }
