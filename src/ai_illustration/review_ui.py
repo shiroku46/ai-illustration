@@ -198,17 +198,20 @@ def load_review_data(manifest_root: Path, asset_root: Path) -> ReviewData:
 
 
 def make_review_decision(
-    candidate: dict[str, Any], *, decision: str, reviewer: str, categories: list[str],
-    notes: str = "", timestamp: str | None = None, verified_image_sha256: str | None = None,
+    candidate: CandidateView | dict[str, Any], *, decision: str, reviewer: str,
+    categories: list[str], notes: str = "", timestamp: str | None = None,
 ) -> dict[str, Any]:
     if decision not in DECISIONS:
         raise ReviewUIError("unsupported review decision")
-    if decision in {"accept", "shortlist"} and (
-        candidate.get("candidate_status") != "technically_valid"
-        or candidate.get("image_available") is not True
-        or verified_image_sha256 != candidate.get("sha256")
-    ):
-        raise ReviewUIError("accept and shortlist require a live verified image matching the candidate checksum")
+    payload = candidate.payload if isinstance(candidate, CandidateView) else candidate
+    if decision in {"accept", "shortlist"}:
+        if not isinstance(candidate, CandidateView):
+            raise ReviewUIError("accept and shortlist require a live CandidateView")
+        verified_bytes = candidate.read_verified_asset()
+        if verified_bytes is None or hashlib.sha256(verified_bytes).hexdigest() != payload.get("sha256"):
+            raise ReviewUIError("accept and shortlist require a live verified image matching the candidate checksum")
+        if payload.get("candidate_status") != "technically_valid":
+            raise ReviewUIError("accept and shortlist require a technically_valid candidate")
     if not reviewer or not reviewer.strip():
         raise ReviewUIError("reviewer is required")
     if any(item not in REVIEW_CATEGORIES for item in categories):
@@ -216,7 +219,7 @@ def make_review_decision(
     timestamp = timestamp or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     if not UTC_RE.fullmatch(timestamp):
         raise ReviewUIError("timestamp must be UTC YYYY-MM-DDTHH:MM:SSZ")
-    candidate_id, request_id, checksum = str(candidate["id"]), str(candidate["request_id"]), str(candidate["sha256"])
+    candidate_id, request_id, checksum = str(payload["id"]), str(payload["request_id"]), str(payload["sha256"])
     if not ID_RE.fullmatch(candidate_id) or not ID_RE.fullmatch(request_id):
         raise ReviewUIError("candidate/request ids are invalid")
     suffix = hashlib.sha256(f"{candidate_id}\n{decision}\n{timestamp}\n{checksum}".encode()).hexdigest()[:12]
