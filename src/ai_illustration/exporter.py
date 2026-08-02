@@ -211,7 +211,12 @@ def _validate_package_schema(package: dict[str, Any], field: str) -> None:
         raise ExportError("PACKAGE_SCHEMA", "package intent must be evaluation or production", "intent")
     if package.get("license_status") not in LICENSE_STATUSES:
         raise ExportError("PACKAGE_SCHEMA", "invalid package license status", "license_status")
-    _safe_relative(package.get("paper_theater_index_path"), "paper_theater_index_path")
+    if package.get("paper_theater_index_path") != PAPER_THEATER_INDEX:
+        raise ExportError(
+            "PACKAGE_SCHEMA",
+            f"paper_theater_index_path must be {PAPER_THEATER_INDEX}",
+            "paper_theater_index_path",
+        )
     _require_sha256(
         package.get("paper_theater_index_sha256"),
         "paper_theater_index_sha256",
