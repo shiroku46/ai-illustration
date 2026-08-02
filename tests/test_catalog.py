@@ -17,7 +17,7 @@ from ai_illustration.catalog import (
     validate_tool_profile,
 )
 
-FIXTURES = Path(__file__).resolve().parent / "fixtures" / "valid"
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "catalog"
 
 
 class CatalogTests(unittest.TestCase):
