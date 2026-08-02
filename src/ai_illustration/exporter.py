@@ -463,6 +463,21 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
     index_payload = inventory.get(index_path)
     if index_payload is None or _sha(index_payload) != index_sha:
         raise ExportError("INDEX_CHECKSUM_MISMATCH", "paper-theater index is missing or modified", index_path)
+    index = _load_object_bytes(index_payload, index_path)
+    if index.get("kind") != "paper-theater-index" or index.get("schema_version") != "1.0":
+        raise ExportError("INDEX_SCHEMA", "invalid paper-theater index kind or schema version", index_path)
+    index_identifier = index.get("id")
+    if not isinstance(index_identifier, str) or not TOKEN_RE.fullmatch(index_identifier):
+        raise ExportError("INDEX_ID", "invalid paper-theater index ID", index_path)
+    index_core = {key: value for key, value in index.items() if key != "id"}
+    if content_identifier("paper-theater-index", index_core, 20) != index_identifier:
+        raise ExportError("INDEX_ID_MISMATCH", "paper-theater index ID is not canonical", index_path)
+    if _json_bytes(index) != index_payload:
+        raise ExportError("INDEX_CANONICAL", "paper-theater index JSON is not canonical", index_path)
+    if index.get("variant_set_ref") != package.get("variant_set_ref"):
+        raise ExportError("INDEX_BINDING_MISMATCH", "paper-theater index variant set differs from package", index_path)
+    if index.get("intent") != package.get("intent"):
+        raise ExportError("INDEX_BINDING_MISMATCH", "paper-theater index intent differs from package", index_path)
 
     items = package.get("items")
     if not isinstance(items, list) or not items:
@@ -470,6 +485,7 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
     production = package.get("intent") == "production"
     if package.get("intent") not in {"evaluation", "production"}:
         raise ExportError("PACKAGE_INTENT", "package intent must be evaluation or production", "intent")
+    expected_index_entries: list[dict[str, Any]] = []
 
     for item in items:
         if not isinstance(item, dict):
@@ -493,6 +509,16 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
         variant_id = item.get("variant_id")
         if not isinstance(variant_id, str) or not TOKEN_RE.fullmatch(variant_id):
             raise ExportError("VARIANT_ID", "package item has invalid variant ID", "variant_id")
+        paper_theater_key = item.get("paper_theater_key")
+        if not isinstance(paper_theater_key, str) or not paper_theater_key:
+            raise ExportError("PAPER_THEATER_KEY", "package item has invalid paper-theater key", "paper_theater_key")
+        expected_index_entries.append({
+            "key": paper_theater_key,
+            "variant_id": variant_id,
+            "png_path": item["png_path"],
+            "sidecar_path": item["sidecar_path"],
+            "sha256": item["png_sha256"],
+        })
         sidecar_path = item["sidecar_path"]
         sidecar = _load_object_bytes(inventory[sidecar_path], sidecar_path)
         sidecar_review_fields = {
@@ -507,7 +533,7 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
         sidecar_checks = {
             "variant_set_ref": package.get("variant_set_ref"),
             "variant_id": variant_id,
-            "paper_theater_key": item.get("paper_theater_key"),
+            "paper_theater_key": paper_theater_key,
             "intent": package.get("intent"),
             "output_path": item.get("png_path"),
             "output_sha256": item.get("png_sha256"),
@@ -540,6 +566,30 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
             if sidecar.get("variant_reviewer") != binding.get("variant_reviewer"):
                 raise ExportError("VARIANT_REVIEW_BINDING_MISMATCH", "reviewer is not bound consistently", review_path)
             expected_files.add(review_path)
+
+    _ensure_unique(
+        [entry["key"] for entry in expected_index_entries],
+        "DUPLICATE_PAPER_THEATER_KEY",
+        "paper-theater keys",
+    )
+    _ensure_unique(
+        [entry["variant_id"] for entry in expected_index_entries],
+        "DUPLICATE_VARIANT_ID",
+        "variant IDs",
+    )
+    _ensure_unique(
+        [entry["png_path"] for entry in expected_index_entries]
+        + [entry["sidecar_path"] for entry in expected_index_entries],
+        "OUTPUT_PATH_COLLISION",
+        "output paths",
+    )
+    expected_index_entries.sort(key=lambda entry: entry["key"])
+    if index.get("entries") != expected_index_entries:
+        raise ExportError(
+            "INDEX_BINDING_MISMATCH",
+            "paper-theater index entries are not the exact package-item projection",
+            index_path,
+        )
 
     extras = sorted(set(inventory) - expected_files)
     missing = sorted(expected_files - set(inventory))
