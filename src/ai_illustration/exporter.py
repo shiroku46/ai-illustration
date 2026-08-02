@@ -32,6 +32,7 @@ VARIANT_REVIEW_BINDING_FIELDS = (
     "variant_review_path",
     "variant_review_sha256",
 )
+VARIANT_REVIEW_SIDECAR_FIELDS = (*VARIANT_REVIEW_BINDING_FIELDS, "variant_reviewer")
 
 
 @dataclass(frozen=True)
@@ -494,6 +495,15 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
             raise ExportError("VARIANT_ID", "package item has invalid variant ID", "variant_id")
         sidecar_path = item["sidecar_path"]
         sidecar = _load_object_bytes(inventory[sidecar_path], sidecar_path)
+        sidecar_review_fields = {
+            field for field in VARIANT_REVIEW_SIDECAR_FIELDS if field in sidecar
+        }
+        if not production and sidecar_review_fields:
+            raise ExportError(
+                "EVALUATION_REVIEW_CLAIM",
+                "evaluation sidecar must not contain variant approval fields",
+                sidecar_path,
+            )
         sidecar_checks = {
             "variant_set_ref": package.get("variant_set_ref"),
             "variant_id": variant_id,
