@@ -21,8 +21,8 @@ def png_chunk(kind: bytes, payload: bytes) -> bytes:
     return len(payload).to_bytes(4, "big") + kind + payload + (zlib.crc32(kind + payload) & 0xFFFFFFFF).to_bytes(4, "big")
 
 
-def ihdr(width: int = 1, height: int = 1) -> bytes:
-    return width.to_bytes(4, "big") + height.to_bytes(4, "big") + bytes([8, 6, 0, 0, 0])
+def ihdr(width: int = 1, height: int = 1, color_type: int = 6) -> bytes:
+    return width.to_bytes(4, "big") + height.to_bytes(4, "big") + bytes([8, color_type, 0, 0, 0])
 
 
 def valid_rgba_png(width: int = 1, height: int = 1) -> bytes:
@@ -154,3 +154,19 @@ class ValidationTests(unittest.TestCase):
     def test_decompression_output_is_bounded_to_ihdr(self):
         payload = PNG_SIGNATURE + png_chunk(b"IHDR", ihdr()) + png_chunk(b"sRGB", b"\x00") + png_chunk(b"IDAT", zlib.compress(b"\x00" * 10000)) + png_chunk(b"IEND", b"")
         self.assertIn("PNG_STRUCTURE", self._validate_asset(payload))
+
+    def test_grayscale_alpha_png_rejects_plte(self):
+        rows = b"\x00\x00\xff"
+        payload = (
+            PNG_SIGNATURE
+            + png_chunk(b"IHDR", ihdr(color_type=4))
+            + png_chunk(b"sRGB", b"\x00")
+            + png_chunk(b"PLTE", b"\x00\x00\x00")
+            + png_chunk(b"IDAT", zlib.compress(rows))
+            + png_chunk(b"IEND", b"")
+        )
+        self.assertIn("PNG_STRUCTURE", self._validate_asset(payload))
+
+
+if __name__ == "__main__":
+    unittest.main()
