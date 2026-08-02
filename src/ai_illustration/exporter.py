@@ -27,6 +27,11 @@ VARIANT_REVIEW_FIELDS = {
     "decision",
     "reviewer",
 }
+VARIANT_REVIEW_BINDING_FIELDS = (
+    "variant_review_ref",
+    "variant_review_path",
+    "variant_review_sha256",
+)
 
 
 @dataclass(frozen=True)
@@ -49,6 +54,16 @@ def _load_object(path: Path) -> dict[str, Any]:
         raise ExportError("LOAD_ERROR", str(exc), str(path)) from exc
     if not isinstance(value, dict):
         raise ExportError("ROOT_TYPE", "JSON root must be an object", str(path))
+    return value
+
+
+def _load_object_bytes(payload: bytes, field: str) -> dict[str, Any]:
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ExportError("LOAD_ERROR", str(exc), field) from exc
+    if not isinstance(value, dict):
+        raise ExportError("ROOT_TYPE", "JSON root must be an object", field)
     return value
 
 
@@ -97,6 +112,15 @@ def _safe_join(root: Path, relative: str, field: str) -> Path:
     return candidate
 
 
+def _safe_relative(value: Any, field: str) -> str:
+    if not isinstance(value, str):
+        raise ExportError("UNSAFE_PATH", "path must be a string", field)
+    try:
+        return str(safe_relative_path(value))
+    except (TypeError, ValueError) as exc:
+        raise ExportError("UNSAFE_PATH", str(exc), field) from exc
+
+
 def _scan_flat_files(root: Path, expected_names: set[str], *, label: str) -> dict[str, Path]:
     found: dict[str, Path] = {}
     for path in root.rglob("*"):
@@ -141,40 +165,58 @@ def _verify_supplied_png(path: Path, variant: dict[str, Any]) -> tuple[bytes, st
     return payload, actual_sha
 
 
-def _validate_variant_review(
+def _validate_variant_review_object(
+    review: dict[str, Any],
+    *,
+    field: str,
+    variant_set_id: str,
+    variant_id: str,
+    png_sha256: str,
+) -> tuple[dict[str, str], bytes]:
+    if set(review) != VARIANT_REVIEW_FIELDS:
+        missing = sorted(VARIANT_REVIEW_FIELDS - set(review))
+        extra = sorted(set(review) - VARIANT_REVIEW_FIELDS)
+        raise ExportError("VARIANT_REVIEW_FIELDS", f"missing={missing}; extra={extra}", field)
+    if review.get("kind") != "variant-review-decision" or review.get("schema_version") != "1.0":
+        raise ExportError("VARIANT_REVIEW_SCHEMA", "invalid variant review kind or schema version", field)
+    if review.get("variant_set_ref") != variant_set_id or review.get("variant_id") != variant_id:
+        raise ExportError("VARIANT_REVIEW_REFERENCE", "variant review does not bind this variant set and ID", field)
+    if review.get("png_sha256") != png_sha256:
+        raise ExportError("VARIANT_REVIEW_CHECKSUM", "variant review checksum does not bind supplied PNG bytes", field)
+    if review.get("decision") != "accept":
+        raise ExportError("VARIANT_REVIEW_NOT_ACCEPTED", "production variant review must be accept", field)
+    reviewer = review.get("reviewer")
+    if not isinstance(reviewer, str) or not reviewer.strip() or len(reviewer) > 200:
+        raise ExportError("VARIANT_REVIEWER", "variant reviewer must be a non-empty bounded string", field)
+    identifier = review.get("id")
+    core = {key: value for key, value in review.items() if key != "id"}
+    expected_id = content_identifier("variant-review", core, 20)
+    if identifier != expected_id:
+        raise ExportError("VARIANT_REVIEW_ID", f"expected canonical review ID {expected_id}", field)
+    payload = _json_bytes(review)
+    review_path = f"reviews/{variant_id}.json"
+    return {
+        "variant_review_ref": identifier,
+        "variant_review_path": review_path,
+        "variant_review_sha256": _sha(payload),
+        "variant_reviewer": reviewer,
+    }, payload
+
+
+def _validate_variant_review_file(
     path: Path,
     *,
     variant_set_id: str,
     variant_id: str,
     png_sha256: str,
-) -> dict[str, str]:
-    review = _load_object(path)
-    if set(review) != VARIANT_REVIEW_FIELDS:
-        missing = sorted(VARIANT_REVIEW_FIELDS - set(review))
-        extra = sorted(set(review) - VARIANT_REVIEW_FIELDS)
-        raise ExportError("VARIANT_REVIEW_FIELDS", f"missing={missing}; extra={extra}", path.name)
-    if review.get("kind") != "variant-review-decision" or review.get("schema_version") != "1.0":
-        raise ExportError("VARIANT_REVIEW_SCHEMA", "invalid variant review kind or schema version", path.name)
-    if review.get("variant_set_ref") != variant_set_id or review.get("variant_id") != variant_id:
-        raise ExportError("VARIANT_REVIEW_REFERENCE", "variant review does not bind this variant set and ID", path.name)
-    if review.get("png_sha256") != png_sha256:
-        raise ExportError("VARIANT_REVIEW_CHECKSUM", "variant review checksum does not bind supplied PNG bytes", path.name)
-    if review.get("decision") != "accept":
-        raise ExportError("VARIANT_REVIEW_NOT_ACCEPTED", "production variant review must be accept", path.name)
-    reviewer = review.get("reviewer")
-    if not isinstance(reviewer, str) or not reviewer.strip() or len(reviewer) > 200:
-        raise ExportError("VARIANT_REVIEWER", "variant reviewer must be a non-empty bounded string", path.name)
-    identifier = review.get("id")
-    core = {key: value for key, value in review.items() if key != "id"}
-    expected_id = content_identifier("variant-review", core, 20)
-    if identifier != expected_id:
-        raise ExportError("VARIANT_REVIEW_ID", f"expected canonical review ID {expected_id}", path.name)
-    payload = _json_bytes(review)
-    return {
-        "variant_review_ref": identifier,
-        "variant_review_sha256": _sha(payload),
-        "variant_reviewer": reviewer,
-    }
+) -> tuple[dict[str, str], bytes]:
+    return _validate_variant_review_object(
+        _load_object(path),
+        field=path.name,
+        variant_set_id=variant_set_id,
+        variant_id=variant_id,
+        png_sha256=png_sha256,
+    )
 
 
 def _inventory_files(root: Path) -> dict[str, bytes]:
@@ -258,16 +300,17 @@ def build_export_package(
         identifier = variant["id"]
         source_name = f"{identifier}.png"
         png_payload, png_sha = _verify_supplied_png(source_files[source_name], variant)
-        png_path = str(safe_relative_path(variant["path"]))
-        sidecar_path = str(safe_relative_path(variant["sidecar_path"]))
+        png_path = _safe_relative(variant["path"], "path")
+        sidecar_path = _safe_relative(variant["sidecar_path"], "sidecar_path")
         review_binding: dict[str, str] = {}
         if production:
-            review_binding = _validate_variant_review(
+            review_binding, review_payload = _validate_variant_review_file(
                 approvals[f"{identifier}.json"],
                 variant_set_id=variant_set["id"],
                 variant_id=identifier,
                 png_sha256=png_sha,
             )
+            file_payloads[review_binding["variant_review_path"]] = review_payload
         sidecar = {
             "kind": "variant-export-sidecar",
             "schema_version": "1.0",
@@ -307,7 +350,7 @@ def build_export_package(
             "png_sha256": png_sha,
             "sidecar_path": sidecar_path,
             "sidecar_sha256": _sha(sidecar_payload),
-            **{key: value for key, value in review_binding.items() if key != "variant_reviewer"},
+            **{key: review_binding[key] for key in VARIANT_REVIEW_BINDING_FIELDS if key in review_binding},
         }
         items.append(item)
         index_entries.append({
@@ -424,29 +467,70 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
     if not isinstance(items, list) or not items:
         raise ExportError("PACKAGE_ITEMS", "package items must be a non-empty list", "items")
     production = package.get("intent") == "production"
+    if package.get("intent") not in {"evaluation", "production"}:
+        raise ExportError("PACKAGE_INTENT", "package intent must be evaluation or production", "intent")
+
     for item in items:
         if not isinstance(item, dict):
             raise ExportError("PACKAGE_ITEM", "package item must be an object", "items")
-        if production:
-            review_ref = item.get("variant_review_ref")
-            review_sha = item.get("variant_review_sha256")
-            if not isinstance(review_ref, str) or not TOKEN_RE.fullmatch(review_ref):
-                raise ExportError("PRODUCTION_VARIANT_REVIEW_REQUIRED", "production package item lacks variant review reference", "variant_review_ref")
-            if not isinstance(review_sha, str) or not SHA256_RE.fullmatch(review_sha):
-                raise ExportError("PRODUCTION_VARIANT_REVIEW_REQUIRED", "production package item lacks variant review checksum", "variant_review_sha256")
+        present_review_fields = {field for field in VARIANT_REVIEW_BINDING_FIELDS if field in item}
+        if production and present_review_fields != set(VARIANT_REVIEW_BINDING_FIELDS):
+            raise ExportError("PRODUCTION_VARIANT_REVIEW_REQUIRED", "production package item lacks complete variant review binding", "items")
+        if not production and present_review_fields:
+            raise ExportError("EVALUATION_REVIEW_CLAIM", "evaluation package must not contain variant approval fields", "items")
+
         for path_field, sha_field in (("png_path", "png_sha256"), ("sidecar_path", "sidecar_sha256")):
-            path = item.get(path_field)
+            path = _safe_relative(item.get(path_field), path_field)
             expected_sha = item.get(sha_field)
-            if not isinstance(path, str) or not isinstance(expected_sha, str) or not SHA256_RE.fullmatch(expected_sha):
-                raise ExportError("PACKAGE_ITEM_REFERENCE", "invalid package item reference", path_field)
-            try:
-                safe_relative_path(path)
-            except (TypeError, ValueError) as exc:
-                raise ExportError("UNSAFE_PATH", str(exc), path_field) from exc
+            if not isinstance(expected_sha, str) or not SHA256_RE.fullmatch(expected_sha):
+                raise ExportError("PACKAGE_ITEM_REFERENCE", "invalid package item checksum", sha_field)
             payload = inventory.get(path)
             if payload is None or _sha(payload) != expected_sha:
                 raise ExportError("PACKAGE_FILE_MISMATCH", f"missing or modified file: {path}", path)
             expected_files.add(path)
+
+        variant_id = item.get("variant_id")
+        if not isinstance(variant_id, str) or not TOKEN_RE.fullmatch(variant_id):
+            raise ExportError("VARIANT_ID", "package item has invalid variant ID", "variant_id")
+        sidecar_path = item["sidecar_path"]
+        sidecar = _load_object_bytes(inventory[sidecar_path], sidecar_path)
+        sidecar_checks = {
+            "variant_set_ref": package.get("variant_set_ref"),
+            "variant_id": variant_id,
+            "paper_theater_key": item.get("paper_theater_key"),
+            "intent": package.get("intent"),
+            "output_path": item.get("png_path"),
+            "output_sha256": item.get("png_sha256"),
+        }
+        for field, expected in sidecar_checks.items():
+            if sidecar.get(field) != expected:
+                raise ExportError("SIDECAR_BINDING_MISMATCH", f"sidecar {field} does not match package item", sidecar_path)
+
+        if production:
+            review_path = _safe_relative(item.get("variant_review_path"), "variant_review_path")
+            review_sha = item.get("variant_review_sha256")
+            if not isinstance(review_sha, str) or not SHA256_RE.fullmatch(review_sha):
+                raise ExportError("PRODUCTION_VARIANT_REVIEW_REQUIRED", "invalid variant review checksum", "variant_review_sha256")
+            review_payload = inventory.get(review_path)
+            if review_payload is None or _sha(review_payload) != review_sha:
+                raise ExportError("VARIANT_REVIEW_FILE_MISMATCH", "variant review file is missing or modified", review_path)
+            review_object = _load_object_bytes(review_payload, review_path)
+            binding, canonical_payload = _validate_variant_review_object(
+                review_object,
+                field=review_path,
+                variant_set_id=package["variant_set_ref"],
+                variant_id=variant_id,
+                png_sha256=item["png_sha256"],
+            )
+            if canonical_payload != review_payload:
+                raise ExportError("VARIANT_REVIEW_CANONICAL", "variant review file is not canonical", review_path)
+            for field in VARIANT_REVIEW_BINDING_FIELDS:
+                if item.get(field) != binding.get(field) or sidecar.get(field) != binding.get(field):
+                    raise ExportError("VARIANT_REVIEW_BINDING_MISMATCH", f"{field} is not bound consistently", review_path)
+            if sidecar.get("variant_reviewer") != binding.get("variant_reviewer"):
+                raise ExportError("VARIANT_REVIEW_BINDING_MISMATCH", "reviewer is not bound consistently", review_path)
+            expected_files.add(review_path)
+
     extras = sorted(set(inventory) - expected_files)
     missing = sorted(expected_files - set(inventory))
     if extras or missing:
