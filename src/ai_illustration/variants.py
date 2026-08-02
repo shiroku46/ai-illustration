@@ -9,7 +9,7 @@ from typing import Any
 
 from .models import Manifest
 from .naming import SHA256_RE, TOKEN_RE, canonical_json, content_identifier, safe_relative_path
-from .validation import load_path, validate_document
+from .validation import _verify_png, load_path, validate_document
 
 INTENTS = {"evaluation", "production"}
 UNRESOLVED_FIELDS = (
@@ -91,7 +91,12 @@ def _split_ref(value: Any, field: str) -> tuple[str, str]:
     return identifier, version
 
 
-def _source_context(index: dict[tuple[str, str], Manifest], candidate_id: str, intent: str) -> dict[str, Any]:
+def _source_context(
+    index: dict[tuple[str, str], Manifest],
+    candidate_id: str,
+    intent: str,
+    root: Path,
+) -> dict[str, Any]:
     if intent not in INTENTS:
         raise VariantError("INTENT", "intent must be evaluation or production", "intent")
     candidate = _require(index, "candidate-asset", candidate_id, "source_candidate")
@@ -103,6 +108,10 @@ def _source_context(index: dict[tuple[str, str], Manifest], candidate_id: str, i
     provenance = c.get("provenance")
     if not isinstance(provenance, dict) or not isinstance(provenance.get("source"), str) or not provenance["source"].strip():
         raise VariantError("UNKNOWN_PROVENANCE", "source candidate provenance is required", "source_candidate")
+    asset_diagnostics = _verify_png(candidate, "path", root.resolve())
+    if asset_diagnostics:
+        first = asset_diagnostics[0]
+        raise VariantError(first.code, first.message, first.field or first.document)
 
     request = _require(index, "generation-request", c.get("request_ref"), "request_ref")
     r = request.data
@@ -233,7 +242,7 @@ def _variant_path(character_id: str, item: dict[str, Any], variant_id: str) -> t
 def plan_variant_set(manifest_root: Path, candidate_id: str, matrix: dict[str, Any], intent: str) -> dict[str, Any]:
     candidate_id = _token(candidate_id, "source_candidate")
     index = _manifest_index(manifest_root)
-    source = _source_context(index, candidate_id, intent)
+    source = _source_context(index, candidate_id, intent, manifest_root)
     combinations, matrix_info = _normalize_matrix(matrix, source)
     variants: list[dict[str, Any]] = []
     used_paths: set[str] = set()
