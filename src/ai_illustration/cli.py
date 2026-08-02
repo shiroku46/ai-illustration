@@ -1,4 +1,4 @@
-"""Command-line interface for manifests, catalogs, adapters, local review, and variants."""
+"""Command-line interface for manifests, catalogs, adapters, local review, variants, and exports."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import sys
 
 from .adapters import AdapterError, ComfyUIAdapter, load_json_object
 from .catalog import catalog_listing, evaluate_compatibility, load_catalog, validate_hardware_profile
+from .exporter import ExportError, build_export_package, check_export_package
 from .models import load_manifest
 from .review_ui import ReviewUIError, run_review_ui
 from .validation import validate_path
@@ -46,6 +47,15 @@ def build_parser() -> argparse.ArgumentParser:
     variant_check = subparsers.add_parser("variant-check", help="validate a variant-set against its source manifests")
     variant_check.add_argument("variant_set", type=Path)
     variant_check.add_argument("--manifest-root", type=Path, required=True)
+    variant_export = subparsers.add_parser("variant-export", help="plan or write a verified local variant export package")
+    variant_export.add_argument("variant_set", type=Path)
+    variant_export.add_argument("--manifest-root", type=Path, required=True)
+    variant_export.add_argument("--source-root", type=Path, required=True)
+    variant_export.add_argument("--output-root", type=Path, required=True)
+    variant_export.add_argument("--write", action="store_true")
+    export_check = subparsers.add_parser("export-check", help="verify a materialized variant export package")
+    export_check.add_argument("package_manifest", type=Path)
+    export_check.add_argument("--output-root", type=Path, required=True)
     return parser
 
 
@@ -83,6 +93,33 @@ def main(argv: list[str] | None = None) -> int:
             return _emit(
                 {"ok": False, "diagnostics": [exc.to_dict()]},
                 f"variant validation failed: {exc.code}",
+                False,
+            )
+
+    if args.command in {"variant-export", "export-check"}:
+        try:
+            if args.command == "variant-export":
+                result = build_export_package(
+                    args.variant_set,
+                    args.manifest_root,
+                    args.source_root,
+                    args.output_root,
+                    write=args.write,
+                )
+                action = "materialized" if args.write else "planned"
+                return _emit(result, f"{action} {len(result['package']['items'])} verified variant export(s)", True)
+            result = check_export_package(args.package_manifest, args.output_root)
+            return _emit(result, f"verified export package with {result['file_count']} file(s)", True)
+        except ExportError as exc:
+            return _emit(
+                {"ok": False, "diagnostics": [exc.to_dict()]},
+                f"export validation failed: {exc.code}",
+                False,
+            )
+        except (OSError, ValueError) as exc:
+            return _emit(
+                {"ok": False, "diagnostics": [{"code": "EXPORT_ERROR", "message": str(exc), "field": ""}]},
+                "export operation failed",
                 False,
             )
 
