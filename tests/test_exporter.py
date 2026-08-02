@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import struct
 import tempfile
 import unittest
@@ -12,12 +13,16 @@ from unittest.mock import patch
 import zlib
 
 from ai_illustration.exporter import ExportError, build_export_package, check_export_package
-from ai_illustration.naming import content_identifier
+from ai_illustration.naming import canonical_json, content_identifier
 from ai_illustration.variants import plan_variant_set
 
 
 def _write_json(path: Path, data: dict[str, object]) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _write_canonical(path: Path, data: dict[str, object]) -> None:
+    path.write_bytes(canonical_json(data) + b"\n")
 
 
 def _png(pixel: tuple[int, ...], *, width: int = 1, height: int = 1, srgb: bool = True, color_type: int = 6) -> bytes:
@@ -106,7 +111,6 @@ class ExporterTests(unittest.TestCase):
     def _clear(self, directory: Path) -> None:
         for child in list(directory.iterdir()):
             if child.is_dir() and not child.is_symlink():
-                import shutil
                 shutil.rmtree(child)
             else:
                 child.unlink()
@@ -184,14 +188,26 @@ class ExporterTests(unittest.TestCase):
         self.assertTrue(repeated["idempotent"])
         self.assertFalse(repeated["published"])
 
-    def test_production_requires_exact_byte_bound_variant_accept_reviews(self) -> None:
+    def test_production_requires_included_exact_byte_bound_accept_reviews(self) -> None:
         production, production_path = self._production_variant_set()
         with self.assertRaisesRegex(ExportError, "PRODUCTION_VARIANT_REVIEW_REQUIRED"):
             self._build(variant_set_path=production_path)
         self._write_approvals(production)
-        result = self._build(variant_set_path=production_path, approval_root=self.approvals)
+        production_output = self.root / "production-output"
+        result = self._build(
+            production_output,
+            write=True,
+            variant_set_path=production_path,
+            approval_root=self.approvals,
+        )
         self.assertEqual(result["package"]["intent"], "production")
-        self.assertTrue(all("variant_review_ref" in item for item in result["package"]["items"]))
+        self.assertTrue(all("variant_review_path" in item for item in result["package"]["items"]))
+        package_root = production_output / result["package_directory"]
+        for item in result["package"]["items"]:
+            self.assertTrue((package_root / item["variant_review_path"]).is_file())
+        self.assertTrue(
+            check_export_package(package_root / "package-manifest.json", production_output)["ok"]
+        )
 
         first = production["variants"][0]
         review_path = self.approvals / f"{first['id']}.json"
@@ -212,9 +228,40 @@ class ExporterTests(unittest.TestCase):
         with self.assertRaisesRegex(ExportError, "VARIANT_REVIEW_NOT_ACCEPTED"):
             self._build(variant_set_path=production_path, approval_root=self.approvals)
 
-    def test_evaluation_rejects_ambiguous_approval_root(self) -> None:
+    def test_export_check_rejects_tampered_production_review_binding(self) -> None:
+        production, production_path = self._production_variant_set()
+        self._write_approvals(production)
+        output = self.root / "tampered-production"
+        result = self._build(output, write=True, variant_set_path=production_path, approval_root=self.approvals)
+        package_root = output / result["package_directory"]
+        first_item = result["package"]["items"][0]
+        review_path = package_root / first_item["variant_review_path"]
+        review = json.loads(review_path.read_text(encoding="utf-8"))
+        review["png_sha256"] = "0" * 64
+        review_core = {key: value for key, value in review.items() if key != "id"}
+        review["id"] = content_identifier("variant-review", review_core, 20)
+        _write_canonical(review_path, review)
+        with self.assertRaisesRegex(ExportError, "VARIANT_REVIEW_FILE_MISMATCH"):
+            check_export_package(package_root / "package-manifest.json", output)
+
+    def test_evaluation_rejects_approval_root_and_embedded_approval_claims(self) -> None:
         with self.assertRaisesRegex(ExportError, "APPROVAL_ROOT_NOT_ALLOWED"):
             self._build(approval_root=self.approvals)
+        output = self.root / "evaluation-claim"
+        result = self._build(output, write=True)
+        old_root = output / result["package_directory"]
+        malicious = copy.deepcopy(result["package"])
+        item = malicious["items"][0]
+        item["variant_review_ref"] = "variant-review-" + "0" * 20
+        item["variant_review_path"] = f"reviews/{item['variant_id']}.json"
+        item["variant_review_sha256"] = "0" * 64
+        core = {key: value for key, value in malicious.items() if key != "id"}
+        malicious["id"] = content_identifier("variant-export-package", core, 20)
+        new_root = output / malicious["id"]
+        shutil.copytree(old_root, new_root)
+        _write_canonical(new_root / "package-manifest.json", malicious)
+        with self.assertRaisesRegex(ExportError, "EVALUATION_REVIEW_CLAIM"):
+            check_export_package(new_root / "package-manifest.json", output)
 
     def test_missing_extra_malformed_dimension_srgb_and_alpha_fail_closed(self) -> None:
         first_id = self.variant_set["variants"][0]["id"]
@@ -271,7 +318,7 @@ class ExporterTests(unittest.TestCase):
         unsafe = copy.deepcopy(self.variant_set)
         unsafe["variants"][0]["path"] = "../escape.png"
         with patch("ai_illustration.exporter.check_variant_set", return_value=unsafe):
-            with self.assertRaises((ExportError, ValueError)):
+            with self.assertRaises(ExportError):
                 self._build()
 
     def test_atomic_failure_leaves_no_published_or_staging_package(self) -> None:
