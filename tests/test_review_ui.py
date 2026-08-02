@@ -111,6 +111,23 @@ class ReviewUITest(unittest.TestCase):
         self.assertEqual(review["categories"], ["generic_eyes", "line_uniformity"])
         self.assertEqual(validate_document(Manifest(Path("review.json"), review)), [])
 
+    def test_non_reviewable_candidate_cannot_be_approved(self) -> None:
+        self.seed()
+        candidate = load_review_data(self.manifests, self.assets).candidates[0].payload
+        self.assertEqual(candidate["candidate_status"], "received")
+        for decision in ("accept", "shortlist"):
+            with self.subTest(decision=decision):
+                with self.assertRaisesRegex(ReviewUIError, "technically_valid"):
+                    make_review_decision(
+                        candidate, decision=decision, reviewer="owner", categories=[],
+                        timestamp="2026-08-02T11:00:00Z",
+                    )
+        rejected = make_review_decision(
+            candidate, decision="reject", reviewer="owner", categories=["other"],
+            timestamp="2026-08-02T11:00:00Z",
+        )
+        self.assertEqual(rejected["decision"], "reject")
+
     def test_imported_review_must_bind_current_request_and_checksum(self) -> None:
         self.seed()
         base = {
@@ -129,7 +146,7 @@ class ReviewUITest(unittest.TestCase):
             load_review_data(self.manifests, self.assets)
 
     def test_review_rejects_unknown_category(self) -> None:
-        self.seed()
+        self.seed(with_image=True)
         candidate = load_review_data(self.manifests, self.assets).candidates[0].payload
         with self.assertRaises(ReviewUIError):
             make_review_decision(candidate, decision="accept", reviewer="owner", categories=["invented"])
@@ -169,6 +186,12 @@ class ReviewUITest(unittest.TestCase):
             self.assertEqual(response.getheader("X-Content-Type-Options"), "nosniff")
             self.assertIn("default-src 'self'", response.getheader("Content-Security-Policy"))
             self.assertEqual(parsed["candidates"][0]["id"], "candidate-demo")
+            connection.request("GET", "/app.js")
+            script = connection.getresponse()
+            script_body = script.read()
+            self.assertEqual(script.status, 200)
+            self.assertIn(b"APPROVAL_DECISIONS", script_body)
+            self.assertIn(b"technically_valid", script_body)
             connection.request("HEAD", "/")
             head = connection.getresponse()
             self.assertEqual(head.status, 200)
