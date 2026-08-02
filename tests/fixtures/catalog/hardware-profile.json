@@ -1,0 +1,10 @@
+{
+  "kind": "hardware-profile",
+  "schema_version": "1.0",
+  "id": "synthetic-workstation",
+  "operating_system": "windows",
+  "ram_gb": 32,
+  "vram_gb": 12,
+  "runtime_types": ["python"],
+  "adapter_types": ["local-http"]
+}

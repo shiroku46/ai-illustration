@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/hardware-profile.schema.json",
+  "title": "Hardware Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["adapter_types", "id", "kind", "operating_system", "ram_gb", "runtime_types", "schema_version", "vram_gb"],
+  "properties": {
+    "kind": {"const": "hardware-profile"},
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "operating_system": {"enum": ["windows", "linux", "macos"]},
+    "ram_gb": {"type": "number", "minimum": 0},
+    "vram_gb": {"type": "number", "minimum": 0},
+    "runtime_types": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}},
+    "adapter_types": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}}
+  }
+}
