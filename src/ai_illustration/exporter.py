@@ -34,6 +34,57 @@ VARIANT_REVIEW_BINDING_FIELDS = (
 )
 VARIANT_REVIEW_SIDECAR_FIELDS = (*VARIANT_REVIEW_BINDING_FIELDS, "variant_reviewer")
 LICENSE_STATUSES = {"unreviewed", "reviewing", "approved", "rejected"}
+PACKAGE_FIELDS = {
+    "id",
+    "kind",
+    "schema_version",
+    "variant_set_ref",
+    "intent",
+    "source_candidate_ref",
+    "source_candidate_sha256",
+    "source_request_ref",
+    "review_ref",
+    "character_ref",
+    "style_ref",
+    "license_status",
+    "paper_theater_index_path",
+    "paper_theater_index_sha256",
+    "items",
+}
+INDEX_FIELDS = {"id", "kind", "schema_version", "variant_set_ref", "intent", "entries"}
+ITEM_BASE_FIELDS = {
+    "variant_id",
+    "paper_theater_key",
+    "png_path",
+    "png_sha256",
+    "sidecar_path",
+    "sidecar_sha256",
+}
+SIDECAR_BASE_FIELDS = {
+    "kind",
+    "schema_version",
+    "variant_set_ref",
+    "variant_id",
+    "paper_theater_key",
+    "intent",
+    "source_candidate_ref",
+    "source_request_ref",
+    "review_ref",
+    "character_ref",
+    "style_ref",
+    "source_file",
+    "source_sha256",
+    "output_path",
+    "output_sha256",
+    "width",
+    "height",
+    "format",
+    "media_type",
+    "color_space",
+    "has_alpha",
+    "license_status",
+    "provenance",
+}
 
 
 @dataclass(frozen=True)
@@ -135,7 +186,15 @@ def _require_sha256(value: Any, field: str, code: str) -> str:
     return value
 
 
+def _require_exact_fields(value: dict[str, Any], expected: set[str], code: str, field: str) -> None:
+    if set(value) != expected:
+        missing = sorted(expected - set(value))
+        extra = sorted(set(value) - expected)
+        raise ExportError(code, f"missing={missing}; extra={extra}", field)
+
+
 def _validate_package_schema(package: dict[str, Any], field: str) -> None:
+    _require_exact_fields(package, PACKAGE_FIELDS, "PACKAGE_SCHEMA", field)
     if package.get("kind") != "variant-export-package" or package.get("schema_version") != "1.0":
         raise ExportError("PACKAGE_SCHEMA", "invalid package kind or schema version", field)
     for name in (
@@ -163,6 +222,11 @@ def _validate_package_schema(package: dict[str, Any], field: str) -> None:
 
 
 def _validate_sidecar_schema(sidecar: dict[str, Any], field: str) -> None:
+    intent = sidecar.get("intent")
+    expected_fields = SIDECAR_BASE_FIELDS | (
+        set(VARIANT_REVIEW_SIDECAR_FIELDS) if intent == "production" else set()
+    )
+    _require_exact_fields(sidecar, expected_fields, "SIDECAR_SCHEMA", field)
     if sidecar.get("kind") != "variant-export-sidecar" or sidecar.get("schema_version") != "1.0":
         raise ExportError("SIDECAR_SCHEMA", "invalid sidecar kind or schema version", field)
     for name in (
@@ -179,7 +243,7 @@ def _validate_sidecar_schema(sidecar: dict[str, Any], field: str) -> None:
         _require_string(sidecar.get(name), name, "SIDECAR_SCHEMA")
     if not TOKEN_RE.fullmatch(sidecar["variant_id"]):
         raise ExportError("SIDECAR_SCHEMA", "invalid sidecar variant ID", field)
-    if sidecar.get("intent") not in {"evaluation", "production"}:
+    if intent not in {"evaluation", "production"}:
         raise ExportError("SIDECAR_SCHEMA", "invalid sidecar intent", field)
     if sidecar.get("license_status") not in LICENSE_STATUSES:
         raise ExportError("SIDECAR_SCHEMA", "invalid sidecar license status", field)
@@ -198,7 +262,9 @@ def _validate_sidecar_schema(sidecar: dict[str, Any], field: str) -> None:
     ):
         raise ExportError("SIDECAR_SCHEMA", "invalid sidecar PNG declarations", field)
     provenance = sidecar.get("provenance")
-    if not isinstance(provenance, dict) or provenance.get("method") != "verified-byte-copy":
+    if not isinstance(provenance, dict) or set(provenance) != {"method", "source_candidate_sha256"}:
+        raise ExportError("SIDECAR_SCHEMA", "invalid sidecar provenance fields", field)
+    if provenance.get("method") != "verified-byte-copy":
         raise ExportError("SIDECAR_SCHEMA", "invalid sidecar provenance method", field)
     _require_sha256(
         provenance.get("source_candidate_sha256"),
@@ -572,6 +638,7 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
     if index_payload is None or _sha(index_payload) != index_sha:
         raise ExportError("INDEX_CHECKSUM_MISMATCH", "paper-theater index is missing or modified", index_path)
     index = _load_object_bytes(index_payload, index_path)
+    _require_exact_fields(index, INDEX_FIELDS, "INDEX_SCHEMA", index_path)
     if index.get("kind") != "paper-theater-index" or index.get("schema_version") != "1.0":
         raise ExportError("INDEX_SCHEMA", "invalid paper-theater index kind or schema version", index_path)
     index_identifier = index.get("id")
@@ -600,6 +667,10 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
     for item in items:
         if not isinstance(item, dict):
             raise ExportError("PACKAGE_ITEM", "package item must be an object", "items")
+        expected_item_fields = ITEM_BASE_FIELDS | (
+            set(VARIANT_REVIEW_BINDING_FIELDS) if production else set()
+        )
+        _require_exact_fields(item, expected_item_fields, "PACKAGE_ITEM", "items")
         present_review_fields = {field for field in VARIANT_REVIEW_SIDECAR_FIELDS if field in item}
         if production and present_review_fields != set(VARIANT_REVIEW_BINDING_FIELDS):
             raise ExportError("PRODUCTION_VARIANT_REVIEW_REQUIRED", "production package item lacks complete variant review binding", "items")
