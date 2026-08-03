@@ -93,6 +93,15 @@ def _safe_existing_file(root: Path, relative: str, field: str) -> tuple[str, Pat
     return normalized, resolved
 
 
+def _lexical_file_under_root(path: Path, root: Path, field: str) -> tuple[str, Path]:
+    lexical = Path(os.path.abspath(path.expanduser()))
+    try:
+        relative = lexical.relative_to(root).as_posix()
+    except ValueError as exc:
+        raise AudioPreviewError("PATH_ESCAPE", f"{field} must be beneath its configured root", field) from exc
+    return _safe_existing_file(root, relative, field)
+
+
 def _load_object(path: Path) -> dict[str, Any]:
     def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
@@ -241,13 +250,7 @@ def _validate_sync(scene_duration_ms: Any, audio_duration_ms: int, offset_ms: An
 
 def _preview_reference(preview_manifest: Path, preview_root: Path, package_root: Path) -> tuple[str, bytes, dict[str, Any], Path]:
     preview_root_resolved = _root(preview_root, must_exist=True, field="preview_root")
-    expanded = preview_manifest.expanduser()
-    lexical = Path(os.path.abspath(expanded))
-    try:
-        relative = lexical.relative_to(preview_root_resolved).as_posix()
-    except ValueError as exc:
-        raise AudioPreviewError("PREVIEW_PATH", "preview manifest must be beneath preview_root", "preview_manifest") from exc
-    normalized, resolved = _safe_existing_file(preview_root_resolved, relative, "preview_manifest")
+    normalized, resolved = _lexical_file_under_root(preview_manifest, preview_root_resolved, "preview_manifest")
     try:
         checked = check_preview_package(resolved, preview_root_resolved, package_root)
     except PreviewError as exc:
@@ -341,7 +344,7 @@ def _css_bytes() -> bytes:
 
 
 def _js_bytes() -> bytes:
-    return b"(()=>{'use strict';const root=document.getElementById('preview');const data=JSON.parse(root.dataset.preview);const audio=document.getElementById('audio');const stage=document.getElementById('stage');stage.style.setProperty('--canvas-ratio',`${data.width}/${data.height}`);const images={boke:document.getElementById('boke'),tsukkomi:document.getElementById('tsukkomi')};const scrub=document.getElementById('scrub');const current=document.getElementById('current');let frame=0;function bounded(ms){return Math.max(0,Math.min(data.scene_duration_ms,Math.floor(ms)))}function sceneFromAudio(){return bounded(audio.currentTime*1000+data.offset_ms)}function segmentAt(ms){let result=data.segments[data.segments.length-1];const query=ms===data.scene_duration_ms?Math.max(0,ms-1):ms;for(const segment of data.segments){if(query>=segment.start_ms&&query<segment.end_ms){result=segment;break}}return result}function render(ms){const value=bounded(ms);const segment=segmentAt(value);for(const role of ['boke','tsukkomi']){const image=images[role];const state=segment[role];image.src=state.asset_path;image.className=`character slot-${segment.stage_slots[role]}`;image.dataset.sha256=state.png_sha256}scrub.value=String(value);current.value=String(value);return value}function tick(){render(sceneFromAudio());if(!audio.paused&&!audio.ended)frame=requestAnimationFrame(tick)}function seekScene(ms){const target=bounded(ms);const seconds=Math.max(0,Math.min(data.audio_duration_ms/1000,(target-data.offset_ms)/1000));audio.currentTime=seconds;render(target)}document.getElementById('play').addEventListener('click',()=>{if(audio.ended||sceneFromAudio()>=data.scene_duration_ms)seekScene(0);audio.play().then(()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(tick)}).catch(()=>{})});document.getElementById('pause').addEventListener('click',()=>{audio.pause();cancelAnimationFrame(frame);render(sceneFromAudio())});document.getElementById('restart').addEventListener('click',()=>{audio.pause();cancelAnimationFrame(frame);seekScene(0)});scrub.addEventListener('input',()=>{audio.pause();cancelAnimationFrame(frame);seekScene(Number(scrub.value))});audio.addEventListener('timeupdate',()=>render(sceneFromAudio()));audio.addEventListener('seeked',()=>render(sceneFromAudio()));audio.addEventListener('ended',()=>{cancelAnimationFrame(frame);render(sceneFromAudio())});seekScene(0)})();\n"
+    return b"(()=>{'use strict';const root=document.getElementById('preview');const data=JSON.parse(root.dataset.preview);const audio=document.getElementById('audio');const stage=document.getElementById('stage');stage.style.setProperty('--canvas-ratio',`${data.width}/${data.height}`);const images={boke:document.getElementById('boke'),tsukkomi:document.getElementById('tsukkomi')};const scrub=document.getElementById('scrub');const current=document.getElementById('current');const audioStart=Math.max(0,data.offset_ms);const audioEnd=Math.min(data.scene_duration_ms,data.offset_ms+data.audio_duration_ms);let frame=0;let mode='paused';let sceneValue=0;let wallStart=0;let wallScene=0;function bounded(ms){return Math.max(0,Math.min(data.scene_duration_ms,Math.floor(ms)))}function segmentAt(ms){let result=data.segments[data.segments.length-1];const query=ms===data.scene_duration_ms?Math.max(0,ms-1):ms;for(const segment of data.segments){if(query>=segment.start_ms&&query<segment.end_ms){result=segment;break}}return result}function render(ms){const value=bounded(ms);const segment=segmentAt(value);for(const role of ['boke','tsukkomi']){const image=images[role];const state=segment[role];image.src=state.asset_path;image.className=`character slot-${segment.stage_slots[role]}`;image.dataset.sha256=state.png_sha256}scrub.value=String(value);current.value=String(value);sceneValue=value;return value}function currentScene(){if(mode==='audio')return bounded(audio.currentTime*1000+data.offset_ms);if(mode==='pre'||mode==='post')return bounded(wallScene+performance.now()-wallStart);return sceneValue}function stopAt(ms){audio.pause();audio.muted=false;cancelAnimationFrame(frame);mode='paused';render(ms)}function tick(){const value=currentScene();render(value);if(value>=data.scene_duration_ms){stopAt(data.scene_duration_ms);return}if(mode==='pre'&&value>=audioStart){startAudio(audioStart);return}if(mode!=='paused')frame=requestAnimationFrame(tick)}function startWall(nextMode,from){audio.pause();audio.muted=false;cancelAnimationFrame(frame);mode=nextMode;wallScene=bounded(from);wallStart=performance.now();frame=requestAnimationFrame(tick)}function audioPosition(scene){return Math.max(0,Math.min(data.audio_duration_ms/1000,(scene-data.offset_ms)/1000))}function startAudio(scene){audio.pause();audio.muted=false;audio.currentTime=audioPosition(scene);cancelAnimationFrame(frame);mode='audio';audio.play().then(()=>{frame=requestAnimationFrame(tick)}).catch(()=>{stopAt(scene)})}function startPre(scene){audio.pause();audio.currentTime=0;audio.muted=true;cancelAnimationFrame(frame);audio.play().then(()=>{mode='pre';wallScene=bounded(scene);wallStart=performance.now();frame=requestAnimationFrame(tick)}).catch(()=>{startWall('pre',scene)})}function playFrom(scene){const target=scene>=data.scene_duration_ms?0:bounded(scene);if(target<audioStart){startPre(target);return}if(target<audioEnd){startAudio(target);return}startWall('post',target)}function seekScene(ms){const target=bounded(ms);audio.pause();audio.muted=false;audio.currentTime=audioPosition(target);cancelAnimationFrame(frame);mode='paused';render(target)}document.getElementById('play').addEventListener('click',()=>playFrom(currentScene()));document.getElementById('pause').addEventListener('click',()=>stopAt(currentScene()));document.getElementById('restart').addEventListener('click',()=>stopAt(0));scrub.addEventListener('input',()=>seekScene(Number(scrub.value)));audio.addEventListener('timeupdate',()=>{if(mode==='audio')render(currentScene())});audio.addEventListener('seeked',()=>{if(mode==='paused')render(sceneValue)});audio.addEventListener('ended',()=>{if(mode!=='audio')return;const end=bounded(data.offset_ms+data.audio_duration_ms);if(end<data.scene_duration_ms)startWall('post',end);else stopAt(data.scene_duration_ms)});seekScene(0)})();\n"
 
 
 def _build_expected(
@@ -507,13 +510,7 @@ def build_audio_preview_package(
 
 def _manifest_location(manifest_path: Path, output_root: Path) -> tuple[Path, dict[str, Any], bytes]:
     root = _root(output_root, must_exist=True, field="output_root")
-    expanded = manifest_path.expanduser()
-    try:
-        resolved = expanded.resolve(strict=True)
-    except OSError as exc:
-        raise AudioPreviewError("MANIFEST_MISSING", str(exc), str(manifest_path)) from exc
-    if expanded.is_symlink() or not resolved.is_file() or not _within(root, resolved):
-        raise AudioPreviewError("MANIFEST_PATH", "audio preview manifest is not a safe file beneath output_root", str(manifest_path))
+    _normalized, resolved = _lexical_file_under_root(manifest_path, root, "audio_preview_manifest")
     return root, _load_object(resolved), resolved.read_bytes()
 
 
