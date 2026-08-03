@@ -763,7 +763,10 @@ def check_export_package(package_manifest_path: Path, output_root: Path) -> dict
             "sha256": item["png_sha256"],
         })
         sidecar_path = normalized_paths["sidecar_path"]
-        sidecar = _load_object_bytes(item_payloads["sidecar_path"], sidecar_path)
+        sidecar_payload = item_payloads["sidecar_path"]
+        sidecar = _load_object_bytes(sidecar_payload, sidecar_path)
+        if sidecar_payload != _json_bytes(sidecar):
+            raise ExportError("SIDECAR_CANONICAL", "sidecar JSON is not canonical", sidecar_path)
         _validate_sidecar_schema(sidecar, sidecar_path)
         sidecar_checks = {
             "variant_set_ref": package["variant_set_ref"],
