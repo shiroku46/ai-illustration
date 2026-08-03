@@ -248,6 +248,13 @@ def _plan_from_cue(cue: dict[str, Any], package_root: Path) -> dict[str, Any]:
     intents = {loaded[role].get("intent") for role in ROLES}
     if len(intents) != 1 or not intents.issubset({"evaluation", "production"}):
         raise PaperTheaterError("INTENT_MISMATCH", "both packages must have the same valid intent", "packages")
+    license_statuses = {loaded[role].get("license_status") for role in ROLES}
+    if len(license_statuses) != 1:
+        raise PaperTheaterError(
+            "LICENSE_STATUS_MISMATCH",
+            "both packages must have the same license status",
+            "packages",
+        )
     intent = next(iter(intents))
     if intent == "production":
         for role in ROLES:
