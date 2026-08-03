@@ -274,6 +274,45 @@ class AudioPreviewTests(unittest.TestCase):
                 self.audio_root,
             )
 
+    def test_preview_manifest_parent_traversal_symlink_bypass_fails_closed(self) -> None:
+        alias = self.preview_root / "alias-parent"
+        try:
+            alias.symlink_to(self.preview_dir, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks are not supported")
+        bypass = alias / ".." / self.preview_id / "preview-manifest.json"
+        with self._patch_preview(), self.assertRaisesRegex(AudioPreviewError, "UNSAFE_PATH"):
+            build_audio_preview_package(
+                bypass,
+                self.preview_root,
+                self.package_root,
+                "voice.wav",
+                self.audio_root,
+                self.output_root,
+                offset_ms=0,
+                duration_policy="exact",
+                audio_license_status="reviewing",
+            )
+
+    def test_audio_preview_manifest_parent_traversal_symlink_bypass_fails_closed(self) -> None:
+        with self._patch_preview():
+            result = self._build(write=True)
+        package = self.output_root / result["audio_preview"]["id"]
+        alias = self.output_root / "alias-parent"
+        try:
+            alias.symlink_to(package, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks are not supported")
+        bypass = alias / ".." / package.name / AUDIO_PREVIEW_MANIFEST
+        with self.assertRaisesRegex(AudioPreviewError, "UNSAFE_PATH"):
+            check_audio_preview_package(
+                bypass,
+                self.output_root,
+                self.preview_root,
+                self.package_root,
+                self.audio_root,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
