@@ -141,12 +141,22 @@ class PaperTheaterTests(unittest.TestCase):
         with self.assertRaisesRegex(PaperTheaterError, "DUPLICATE_STAGE_SLOT"):
             self._plan(cue)
 
-    def test_intent_mismatch_and_unapproved_production_fail_closed(self) -> None:
+    def test_intent_license_mismatch_and_unapproved_production_fail_closed(self) -> None:
         self.package_data[self.tsukkomi_id]["intent"] = "production"
         with self.assertRaisesRegex(PaperTheaterError, "INTENT_MISMATCH"):
             self._plan()
+
+        self.package_data[self.tsukkomi_id]["intent"] = "evaluation"
+        self.package_data[self.tsukkomi_id]["license_status"] = "rejected"
+        with self.assertRaisesRegex(PaperTheaterError, "LICENSE_STATUS_MISMATCH"):
+            self._plan()
+        self.package_data[self.tsukkomi_id]["license_status"] = "approved"
+        self.assertTrue(self._plan()["ok"])
+
         self.package_data[self.boke_id]["intent"] = "production"
+        self.package_data[self.tsukkomi_id]["intent"] = "production"
         self.package_data[self.boke_id]["license_status"] = "reviewing"
+        self.package_data[self.tsukkomi_id]["license_status"] = "reviewing"
         with self.assertRaisesRegex(PaperTheaterError, "PRODUCTION_LICENSE_NOT_APPROVED"):
             self._plan()
 
