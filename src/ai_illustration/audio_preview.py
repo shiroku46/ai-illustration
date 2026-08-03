@@ -76,6 +76,11 @@ def _safe_existing_file(root: Path, relative: str, field: str) -> tuple[str, Pat
         raise AudioPreviewError("UNSAFE_PATH", str(exc), field) from exc
     normalized = safe.as_posix()
     candidate = root.joinpath(*safe.parts)
+    current = root
+    for part in safe.parts:
+        current = current / part
+        if current.is_symlink():
+            raise AudioPreviewError("PATH_SYMLINK", f"{field} contains a symlink component", field)
     try:
         resolved = candidate.resolve(strict=True)
     except OSError as exc:
@@ -169,7 +174,7 @@ def _parse_wav(payload: bytes) -> dict[str, Any]:
         if len(fmt) < 40:
             raise AudioPreviewError("WAV_EXTENSIBLE", "extensible fmt chunk is incomplete", "audio")
         extension_size = struct.unpack_from("<H", fmt, 16)[0]
-        if extension_size < 22:
+        if extension_size < 22 or len(fmt) < 18 + extension_size:
             raise AudioPreviewError("WAV_EXTENSIBLE", "extensible fmt extension is incomplete", "audio")
         subtype = fmt[24:40]
         expected_suffix = b"\x00\x00\x10\x00\x80\x00\x00\xaa\x00\x38\x9b\x71"
@@ -354,7 +359,18 @@ def _build_expected(
     normalized_audio, audio_source = _safe_existing_file(audio_root_resolved, audio_relative, "audio")
     if Path(normalized_audio).suffix.lower() != ".wav":
         raise AudioPreviewError("AUDIO_EXTENSION", "audio input must use the .wav extension", "audio")
-    audio_bytes = audio_source.read_bytes()
+    try:
+        declared_audio_size = audio_source.stat().st_size
+    except OSError as exc:
+        raise AudioPreviewError("AUDIO_STAT", str(exc), "audio") from exc
+    if declared_audio_size <= 0:
+        raise AudioPreviewError("WAV_EMPTY", "WAV input is empty", "audio")
+    if declared_audio_size > MAX_AUDIO_BYTES:
+        raise AudioPreviewError("WAV_TOO_LARGE", f"WAV exceeds {MAX_AUDIO_BYTES} bytes", "audio")
+    with audio_source.open("rb") as handle:
+        audio_bytes = handle.read(MAX_AUDIO_BYTES + 1)
+    if len(audio_bytes) != declared_audio_size or len(audio_bytes) > MAX_AUDIO_BYTES:
+        raise AudioPreviewError("WAV_SIZE_CHANGED", "WAV size changed or exceeded the bounded read", "audio")
     facts = _parse_wav(audio_bytes)
     offset, synchronized_end = _validate_sync(preview.get("duration_ms"), facts["duration_ms"], offset_ms, duration_policy)
     if audio_license_status not in LICENSE_STATUSES:
