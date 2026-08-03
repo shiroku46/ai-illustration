@@ -1,0 +1,57 @@
+{
+  "id": "paper-theater-composition-profile-a6bad992f45531656453",
+  "kind": "paper-theater-composition-profile",
+  "schema_version": "1.0",
+  "canvas": {
+    "width": 1280,
+    "height": 720,
+    "background_rgba": [
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "slots": [
+    {
+      "name": "left",
+      "source_anchor": {
+        "x": 0,
+        "y": 720
+      },
+      "target_anchor": {
+        "x": 320,
+        "y": 720
+      },
+      "scale": {
+        "numerator": 1,
+        "denominator": 1
+      },
+      "translation": {
+        "x": 0,
+        "y": 0
+      },
+      "z_order": 0
+    },
+    {
+      "name": "right",
+      "source_anchor": {
+        "x": 0,
+        "y": 720
+      },
+      "target_anchor": {
+        "x": 960,
+        "y": 720
+      },
+      "scale": {
+        "numerator": 1,
+        "denominator": 1
+      },
+      "translation": {
+        "x": 0,
+        "y": 0
+      },
+      "z_order": 1
+    }
+  ]
+}

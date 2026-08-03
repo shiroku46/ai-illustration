@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/paper-theater-renderer-job.schema.json",
+  "title": "Paper Theater Renderer Job",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "kind",
+    "schema_version",
+    "source_bindings",
+    "intent",
+    "audio_license_status",
+    "canvas",
+    "fps_num",
+    "fps_den",
+    "frame_count",
+    "span_count",
+    "audio_placement",
+    "operation_vocabulary",
+    "transform_fingerprint",
+    "source_binding_fingerprint",
+    "media_created",
+    "files"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^paper-theater-renderer-job-[0-9a-f]{20}$"
+    },
+    "kind": {
+      "const": "paper-theater-renderer-job"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "source_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "render_plan",
+        "composition_profile"
+      ],
+      "properties": {
+        "render_plan": {
+          "$ref": "#/$defs/binding"
+        },
+        "composition_profile": {
+          "$ref": "#/$defs/binding"
+        }
+      }
+    },
+    "intent": {
+      "enum": [
+        "evaluation",
+        "production"
+      ]
+    },
+    "audio_license_status": {
+      "type": "string",
+      "minLength": 1
+    },
+    "canvas": {
+      "type": "object"
+    },
+    "fps_num": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000
+    },
+    "fps_den": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000
+    },
+    "frame_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2000000
+    },
+    "span_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2000000
+    },
+    "audio_placement": {
+      "type": "object"
+    },
+    "operation_vocabulary": {
+      "type": "array",
+      "const": [
+        "clear-canvas",
+        "place-source-asset",
+        "preserve-straight-alpha",
+        "retain-audio-binding-unchanged"
+      ]
+    },
+    "transform_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_binding_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "media_created": {
+      "const": false
+    },
+    "files": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "$ref": "#/$defs/file"
+      }
+    }
+  },
+  "$defs": {
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "size"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

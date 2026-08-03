@@ -10,6 +10,7 @@ import sys
 from .adapters import AdapterError, ComfyUIAdapter, load_json_object
 from .audio_preview import AudioPreviewError, build_audio_preview_package, check_audio_preview_package
 from .catalog import catalog_listing, evaluate_compatibility, load_catalog, validate_hardware_profile
+from .composition import CompositionError, build_composition_job_package, check_composition_job_package
 from .exporter import ExportError, build_export_package, check_export_package
 from .models import load_manifest
 from .paper_theater import PaperTheaterError, check_scene_plan, plan_scene
@@ -113,6 +114,24 @@ def build_parser() -> argparse.ArgumentParser:
     render_check.add_argument("--preview-root", type=Path, required=True)
     render_check.add_argument("--package-root", type=Path, required=True)
     render_check.add_argument("--audio-root", type=Path, required=True)
+    composition_job = subparsers.add_parser("composition-job", help="plan or write a deterministic composition-bound renderer job")
+    composition_job.add_argument("render_plan_manifest", type=Path)
+    composition_job.add_argument("composition_profile", type=Path)
+    composition_job.add_argument("--render-plan-root", type=Path, required=True)
+    composition_job.add_argument("--audio-preview-root", type=Path, required=True)
+    composition_job.add_argument("--preview-root", type=Path, required=True)
+    composition_job.add_argument("--package-root", type=Path, required=True)
+    composition_job.add_argument("--audio-root", type=Path, required=True)
+    composition_job.add_argument("--output-root", type=Path, required=True)
+    composition_job.add_argument("--write", action="store_true")
+    composition_check = subparsers.add_parser("composition-job-check", help="verify a deterministic composition-bound renderer job")
+    composition_check.add_argument("renderer_job_manifest", type=Path)
+    composition_check.add_argument("--output-root", type=Path, required=True)
+    composition_check.add_argument("--render-plan-root", type=Path, required=True)
+    composition_check.add_argument("--audio-preview-root", type=Path, required=True)
+    composition_check.add_argument("--preview-root", type=Path, required=True)
+    composition_check.add_argument("--package-root", type=Path, required=True)
+    composition_check.add_argument("--audio-root", type=Path, required=True)
     return parser
 
 
@@ -211,6 +230,37 @@ def main(argv: list[str] | None = None) -> int:
             return _emit({"ok": False, "diagnostics": [exc.to_dict()]}, f"render-plan validation failed: {exc.code}", False)
         except OSError as exc:
             return _emit({"ok": False, "diagnostics": [{"code": "RENDER_PLAN_ERROR", "message": str(exc), "field": ""}]}, "render-plan operation failed", False)
+
+    if args.command in {"composition-job", "composition-job-check"}:
+        try:
+            if args.command == "composition-job":
+                result = build_composition_job_package(
+                    args.render_plan_manifest,
+                    args.composition_profile,
+                    args.render_plan_root,
+                    args.audio_preview_root,
+                    args.preview_root,
+                    args.package_root,
+                    args.audio_root,
+                    args.output_root,
+                    write=args.write,
+                )
+                action = "materialized" if args.write else "planned"
+                return _emit(result, f"{action} composition-bound renderer job with {result['renderer_job']['span_count']} span(s)", True)
+            result = check_composition_job_package(
+                args.renderer_job_manifest,
+                args.output_root,
+                args.render_plan_root,
+                args.audio_preview_root,
+                args.preview_root,
+                args.package_root,
+                args.audio_root,
+            )
+            return _emit(result, f"verified composition-bound renderer job with {result['span_count']} span(s)", True)
+        except CompositionError as exc:
+            return _emit({"ok": False, "diagnostics": [exc.to_dict()]}, f"composition validation failed: {exc.code}", False)
+        except OSError as exc:
+            return _emit({"ok": False, "diagnostics": [{"code": "COMPOSITION_ERROR", "message": str(exc), "field": ""}]}, "composition operation failed", False)
 
     if args.command == "review-ui":
         try:
