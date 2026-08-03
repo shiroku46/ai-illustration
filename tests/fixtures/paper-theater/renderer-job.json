@@ -1,0 +1,69 @@
+{
+  "id": "paper-theater-renderer-job-cc3081e17aa70e1ea7f1",
+  "kind": "paper-theater-renderer-job",
+  "schema_version": "1.0",
+  "source_bindings": {
+    "render_plan": {
+      "id": "paper-theater-render-plan-11111111111111111111",
+      "path": "paper-theater-render-plan-11111111111111111111/render-plan-manifest.json",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "composition_profile": {
+      "id": "paper-theater-composition-profile-a6bad992f45531656453",
+      "path": "composition-profile.json",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  },
+  "intent": "evaluation",
+  "audio_license_status": "reviewing",
+  "canvas": {
+    "width": 1280,
+    "height": 720,
+    "background_rgba": [
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "fps_num": 24,
+  "fps_den": 1,
+  "frame_count": 24,
+  "span_count": 1,
+  "audio_placement": {
+    "policy": "signed-rational-sample-offset-no-resampling",
+    "offset_ms": 0,
+    "start_sample_num": 0,
+    "start_sample_den": 1000,
+    "source_sample_rate": 48000,
+    "source_frame_count": 48000,
+    "duration_policy": "exact",
+    "synchronized_audio_end_ms": 1000
+  },
+  "operation_vocabulary": [
+    "clear-canvas",
+    "place-source-asset",
+    "preserve-straight-alpha",
+    "retain-audio-binding-unchanged"
+  ],
+  "transform_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "source_binding_fingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "media_created": false,
+  "files": [
+    {
+      "path": "composition-profile.json",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "size": 1
+    },
+    {
+      "path": "source-bindings.json",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "size": 1
+    },
+    {
+      "path": "span-transforms.json",
+      "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "size": 1
+    }
+  ]
+}
