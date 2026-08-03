@@ -94,7 +94,10 @@ def _safe_existing_file(root: Path, relative: str, field: str) -> tuple[str, Pat
 
 
 def _lexical_file_under_root(path: Path, root: Path, field: str) -> tuple[str, Path]:
-    lexical = Path(os.path.abspath(path.expanduser()))
+    expanded = path.expanduser()
+    if ".." in expanded.parts:
+        raise AudioPreviewError("UNSAFE_PATH", f"{field} must not contain parent traversal", field)
+    lexical = expanded if expanded.is_absolute() else Path.cwd() / expanded
     try:
         relative = lexical.relative_to(root).as_posix()
     except ValueError as exc:
