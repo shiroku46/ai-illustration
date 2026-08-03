@@ -133,6 +133,7 @@ class PaperTheaterTests(unittest.TestCase):
     def test_same_package_and_duplicate_slot_fail_closed(self) -> None:
         cue = copy.deepcopy(self.cue)
         cue["packages"]["tsukkomi"] = cue["packages"]["boke"]
+        cue["initial"]["tsukkomi"] = "boke.neutral"
         with self.assertRaisesRegex(PaperTheaterError, "PACKAGE_REUSE"):
             self._plan(cue)
         cue = copy.deepcopy(self.cue)
