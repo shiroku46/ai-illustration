@@ -186,6 +186,53 @@ class AudioPreviewTests(unittest.TestCase):
         self.assertEqual(facts["encoding"], "ieee-float")
         self.assertEqual(facts["frame_count"], frames)
 
+    def test_oversized_symlinked_and_inconsistent_extensible_inputs_fail(self) -> None:
+        oversized = self.audio_root / "oversized.wav"
+        with oversized.open("wb") as handle:
+            handle.truncate(512 * 1024 * 1024 + 1)
+        with self._patch_preview(), self.assertRaisesRegex(AudioPreviewError, "WAV_TOO_LARGE"):
+            build_audio_preview_package(
+                self.preview_manifest,
+                self.preview_root,
+                self.package_root,
+                "oversized.wav",
+                self.audio_root,
+                self.output_root,
+                offset_ms=0,
+                duration_policy="exact",
+                audio_license_status="reviewing",
+            )
+
+        linked = self.audio_root / "linked"
+        target = self.audio_root / "target"
+        target.mkdir()
+        (target / "voice.wav").write_bytes(self.audio_bytes)
+        try:
+            linked.symlink_to(target, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pass
+        else:
+            with self._patch_preview(), self.assertRaisesRegex(AudioPreviewError, "PATH_SYMLINK"):
+                build_audio_preview_package(
+                    self.preview_manifest,
+                    self.preview_root,
+                    self.package_root,
+                    "linked/voice.wav",
+                    self.audio_root,
+                    self.output_root,
+                    offset_ms=0,
+                    duration_policy="exact",
+                    audio_license_status="reviewing",
+                )
+
+        extension = struct.pack("<H", 65535) + b"\0" * 22
+        fmt = struct.pack("<HHIIHH", 0xFFFE, 1, 8000, 16000, 2, 16) + extension
+        data = b"\0" * 16000
+        body = b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", len(data)) + data
+        payload = b"RIFF" + struct.pack("<I", len(body)) + body
+        with self.assertRaisesRegex(AudioPreviewError, "WAV_EXTENSIBLE"):
+            _parse_wav(payload)
+
 
 if __name__ == "__main__":
     unittest.main()
