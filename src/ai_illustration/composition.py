@@ -73,8 +73,7 @@ def _reject_lexical_path(value: Path, field: str) -> Path:
 
 def _reject_symlink_components(path: Path, field: str) -> None:
     lexical = path if path.is_absolute() else Path.cwd() / path
-    chain = [lexical, *lexical.parents]
-    for candidate in chain:
+    for candidate in (lexical, *lexical.parents):
         try:
             if candidate.exists() and candidate.is_symlink():
                 raise CompositionError("PATH_SYMLINK", f"{field} contains a symlink component", field)
@@ -165,6 +164,119 @@ def _load_object(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise CompositionError("ROOT_TYPE", "JSON root must be an object", str(path))
     return value
+
+
+def _package_dir_for_relative(root: Path, relative: Any, field: str) -> Path | None:
+    if not isinstance(relative, str) or not relative:
+        return None
+    try:
+        safe = safe_relative_path(relative)
+    except (TypeError, ValueError) as exc:
+        raise CompositionError("UNSAFE_PATH", str(exc), field) from exc
+    candidate = root.joinpath(*safe.parts)
+    _reject_symlink_components(candidate, field)
+    return candidate.parent.resolve(strict=False)
+
+
+def _package_dir_for_id(root: Path, identifier: Any, field: str) -> Path | None:
+    if not isinstance(identifier, str) or not identifier:
+        return None
+    try:
+        safe = safe_relative_path(identifier)
+    except (TypeError, ValueError) as exc:
+        raise CompositionError("UNSAFE_PATH", str(exc), field) from exc
+    if len(safe.parts) != 1:
+        raise CompositionError("UNSAFE_PATH", f"{field} must be one package identifier", field)
+    candidate = root / safe.parts[0]
+    _reject_symlink_components(candidate, field)
+    return candidate.resolve(strict=False)
+
+
+def _source_package_directories(
+    plan_path: Path,
+    render_plan: dict[str, Any],
+    audio_preview_root: Path,
+    preview_root: Path,
+    package_root: Path,
+    audio_root: Path,
+) -> set[Path]:
+    directories: set[Path] = {plan_path.parent.resolve()}
+    audio_preview_base = _root(audio_preview_root, must_exist=True, field="audio_preview_root")
+    preview_base = _root(preview_root, must_exist=True, field="preview_root")
+    package_base = _root(package_root, must_exist=True, field="package_root")
+    audio_base = _root(audio_root, must_exist=True, field="audio_root")
+    bindings = render_plan.get("source_bindings")
+    if not isinstance(bindings, dict):
+        return directories
+
+    audio_preview = bindings.get("audio_preview")
+    if isinstance(audio_preview, dict):
+        package = _package_dir_for_relative(
+            audio_preview_base,
+            audio_preview.get("path"),
+            "source_bindings.audio_preview.path",
+        )
+        if package is not None:
+            directories.add(package)
+
+    source_preview = bindings.get("source_preview")
+    if isinstance(source_preview, dict):
+        package = _package_dir_for_relative(
+            preview_base,
+            source_preview.get("path"),
+            "source_bindings.source_preview.path",
+        )
+        if package is not None:
+            directories.add(package)
+
+    scene_plan_ref = bindings.get("scene_plan_ref")
+    package = _package_dir_for_id(preview_base, scene_plan_ref, "source_bindings.scene_plan_ref")
+    if package is not None:
+        directories.add(package)
+
+    roles = bindings.get("roles")
+    if isinstance(roles, dict):
+        for role in ("boke", "tsukkomi"):
+            item = roles.get(role)
+            if isinstance(item, dict):
+                package = _package_dir_for_id(
+                    package_base,
+                    item.get("package_id"),
+                    f"source_bindings.roles.{role}.package_id",
+                )
+                if package is not None:
+                    directories.add(package)
+
+    audio = bindings.get("audio")
+    if isinstance(audio, dict):
+        for key in ("package_path", "source_path"):
+            package = _package_dir_for_relative(audio_base, audio.get(key), f"source_bindings.audio.{key}")
+            if package is not None:
+                directories.add(package)
+    return directories
+
+
+def _output_candidate(output_root: Path) -> Path:
+    expanded = _reject_lexical_path(output_root, "output_root")
+    _reject_symlink_components(expanded, "output_root")
+    if expanded.exists() and not expanded.is_dir():
+        raise CompositionError("ROOT_TYPE", "output_root must be a directory", "output_root")
+    try:
+        return expanded.resolve(strict=False)
+    except OSError as exc:
+        raise CompositionError("PATH_ERROR", str(exc), "output_root") from exc
+
+
+def _reject_output_overlap(output_root: Path, source_packages: set[Path]) -> None:
+    candidate = _output_candidate(output_root)
+    for source in sorted(source_packages, key=str):
+        canonical_source = source.resolve(strict=False)
+        if candidate == canonical_source or _within(canonical_source, candidate):
+            raise CompositionError(
+                "OUTPUT_OVERLAPS_SOURCE",
+                f"output_root must not equal or be nested beneath source package {canonical_source}",
+                "output_root",
+            )
 
 
 def _anchor(value: Any, field: str) -> dict[str, int]:
@@ -351,7 +463,7 @@ def _build_expected(
     preview_root: Path,
     package_root: Path,
     audio_root: Path,
-) -> tuple[dict[str, Any], dict[str, bytes]]:
+) -> tuple[dict[str, Any], dict[str, bytes], set[Path]]:
     plan_root = _root(render_plan_root, must_exist=True, field="render_plan_root")
     plan_relative, plan_path = _lexical_file_under_root(render_plan_manifest, plan_root, "render_plan_manifest")
     try:
@@ -390,6 +502,14 @@ def _build_expected(
     upstream_bindings = render_plan.get("source_bindings")
     if not isinstance(audio_placement, dict) or not isinstance(upstream_bindings, dict):
         raise CompositionError("RENDER_PLAN_SCHEMA", "render-plan provenance or audio placement is missing", "render_plan")
+    source_packages = _source_package_directories(
+        plan_path,
+        render_plan,
+        audio_preview_root,
+        preview_root,
+        package_root,
+        audio_root,
+    )
     spans = _build_span_transforms(render_plan, profile)
     transform_fingerprint = _sha(_json_bytes(spans))
     source_fingerprint = _sha(_json_bytes({"source_bindings": upstream_bindings, "audio_placement": audio_placement}))
@@ -452,7 +572,7 @@ def _build_expected(
     ]
     manifest = {**identified, "files": files}
     generated[RENDERER_JOB_MANIFEST] = _json_bytes(manifest)
-    return manifest, generated
+    return manifest, generated, source_packages
 
 
 def _write_package(output_root: Path, manifest: dict[str, Any], files: dict[str, bytes]) -> bool:
@@ -513,7 +633,7 @@ def build_composition_job_package(
     *,
     write: bool = False,
 ) -> dict[str, Any]:
-    manifest, files = _build_expected(
+    manifest, files, source_packages = _build_expected(
         render_plan_manifest,
         composition_profile,
         render_plan_root,
@@ -522,7 +642,11 @@ def build_composition_job_package(
         package_root,
         audio_root,
     )
-    written = _write_package(output_root, manifest, files) if write else False
+    if write:
+        _reject_output_overlap(output_root, source_packages)
+        written = _write_package(output_root, manifest, files)
+    else:
+        written = False
     return {
         "ok": True,
         "renderer_job": manifest,
@@ -564,8 +688,20 @@ def check_composition_job_package(
         raise CompositionError("MANIFEST_SCHEMA", "source render-plan path is missing", "source_bindings.render_plan.path")
     plan_root = _root(render_plan_root, must_exist=True, field="render_plan_root")
     _normalized, source_manifest = _safe_existing_file(plan_root, source_relative, "source_bindings.render_plan.path")
+
+    raw_plan = _load_object(source_manifest)
+    early_sources = _source_package_directories(
+        source_manifest,
+        raw_plan,
+        audio_preview_root,
+        preview_root,
+        package_root,
+        audio_root,
+    )
+    _reject_output_overlap(root, early_sources)
+
     profile_path = root / job_id / COMPOSITION_PROFILE
-    expected_manifest, expected_files = _build_expected(
+    expected_manifest, expected_files, source_packages = _build_expected(
         source_manifest,
         profile_path,
         plan_root,
@@ -574,6 +710,7 @@ def check_composition_job_package(
         package_root,
         audio_root,
     )
+    _reject_output_overlap(root, source_packages)
     if manifest != expected_manifest:
         raise CompositionError("MANIFEST_BINDING_MISMATCH", "renderer-job manifest is stale or not canonical", str(manifest_path))
     destination = root / job_id
