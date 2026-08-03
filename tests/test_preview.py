@@ -7,7 +7,13 @@ import unittest
 from unittest.mock import patch
 
 from ai_illustration.naming import canonical_json, content_identifier
-from ai_illustration.preview import PreviewError, PREVIEW_MANIFEST, build_preview_package, check_preview_package
+from ai_illustration.preview import (
+    PreviewError,
+    PREVIEW_MANIFEST,
+    _js_bytes,
+    build_preview_package,
+    check_preview_package,
+)
 
 
 def canonical_bytes(value: object) -> bytes:
@@ -87,6 +93,13 @@ class PreviewTests(unittest.TestCase):
 
     def _patch_scene(self):
         return patch("ai_illustration.preview.check_scene_plan", return_value=self.scene_result)
+
+    def test_player_keeps_playback_baseline_fixed_until_control_action(self) -> None:
+        script = _js_bytes().decode("utf-8")
+        self.assertIn("let position=0", script)
+        self.assertIn("position+(now-started)", script)
+        self.assertIn("if(playing)position=render", script)
+        self.assertNotIn("offset=bounded", script)
 
     def test_deterministic_dry_run_does_not_write(self) -> None:
         with self._patch_scene():
