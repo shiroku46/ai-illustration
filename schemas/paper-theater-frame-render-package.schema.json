@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/paper-theater-frame-render-package.schema.json",
+  "title": "Paper Theater Frame Render Package",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "kind",
+    "schema_version",
+    "source_renderer_job",
+    "intent",
+    "audio_license_status",
+    "canvas",
+    "fps_num",
+    "fps_den",
+    "frame_count",
+    "span_count",
+    "audio_placement",
+    "render_policy",
+    "frame_inventory",
+    "media_created",
+    "files"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^paper-theater-frame-render-package-[0-9a-f]{20}$"
+    },
+    "kind": {
+      "const": "paper-theater-frame-render-package"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "source_renderer_job": {
+      "$ref": "#/$defs/binding"
+    },
+    "intent": {
+      "enum": [
+        "evaluation",
+        "production"
+      ]
+    },
+    "audio_license_status": {
+      "type": "string",
+      "minLength": 1
+    },
+    "canvas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height",
+        "background_rgba"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8192
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8192
+        },
+        "background_rgba": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          }
+        }
+      }
+    },
+    "fps_num": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000
+    },
+    "fps_den": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000
+    },
+    "frame_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "span_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "audio_placement": {
+      "type": "object"
+    },
+    "render_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "coordinate_rule",
+        "scale_arithmetic",
+        "compositing",
+        "png_encoding"
+      ],
+      "properties": {
+        "coordinate_rule": {
+          "const": "inverse-pixel-center-floor"
+        },
+        "scale_arithmetic": {
+          "const": "reduced-rational-integer-only"
+        },
+        "compositing": {
+          "const": "straight-alpha-source-over-integer-round-half-up"
+        },
+        "png_encoding": {
+          "const": "rgba8-noninterlaced-srgb-filter0-zlib9"
+        }
+      }
+    },
+    "frame_inventory": {
+      "$ref": "#/$defs/binding"
+    },
+    "media_created": {
+      "const": true
+    },
+    "files": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "$ref": "#/$defs/file"
+      }
+    }
+  },
+  "$defs": {
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "size"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
