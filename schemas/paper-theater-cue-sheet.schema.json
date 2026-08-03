@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/paper-theater-cue-sheet.schema.json",
+  "title": "Paper Theater Cue Sheet",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "duration_ms",
+    "packages",
+    "stage_slots",
+    "initial",
+    "events"
+  ],
+  "properties": {
+    "kind": {
+      "const": "paper-theater-cue-sheet"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "packages": {
+      "$ref": "#/$defs/rolesPaths"
+    },
+    "stage_slots": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "boke",
+        "tsukkomi"
+      ],
+      "properties": {
+        "boke": {
+          "enum": [
+            "left",
+            "right",
+            "center"
+          ]
+        },
+        "tsukkomi": {
+          "enum": [
+            "left",
+            "right",
+            "center"
+          ]
+        }
+      }
+    },
+    "initial": {
+      "$ref": "#/$defs/rolesKeys"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "at_ms",
+          "role",
+          "key"
+        ],
+        "properties": {
+          "at_ms": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "role": {
+            "enum": [
+              "boke",
+              "tsukkomi"
+            ]
+          },
+          "key": {
+            "$ref": "#/$defs/key"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "path": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\\\\\)[^\\u0000]+$"
+    },
+    "key": {
+      "type": "string",
+      "pattern": "^[a-z0-9.-]+$"
+    },
+    "rolesPaths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "boke",
+        "tsukkomi"
+      ],
+      "properties": {
+        "boke": {
+          "$ref": "#/$defs/path"
+        },
+        "tsukkomi": {
+          "$ref": "#/$defs/path"
+        }
+      }
+    },
+    "rolesKeys": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "boke",
+        "tsukkomi"
+      ],
+      "properties": {
+        "boke": {
+          "$ref": "#/$defs/key"
+        },
+        "tsukkomi": {
+          "$ref": "#/$defs/key"
+        }
+      }
+    }
+  }
+}

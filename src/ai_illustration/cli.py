@@ -1,4 +1,4 @@
-"""Command-line interface for manifests, catalogs, adapters, local review, variants, and exports."""
+"""Command-line interface for manifests, catalogs, adapters, local review, variants, exports, and paper theater."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from .adapters import AdapterError, ComfyUIAdapter, load_json_object
 from .catalog import catalog_listing, evaluate_compatibility, load_catalog, validate_hardware_profile
 from .exporter import ExportError, build_export_package, check_export_package
 from .models import load_manifest
+from .paper_theater import PaperTheaterError, check_scene_plan, plan_scene
 from .review_ui import ReviewUIError, run_review_ui
 from .validation import validate_path
 from .variants import VariantError, check_variant_set, load_json_object as load_variant_json, plan_variant_set
@@ -61,6 +62,13 @@ def build_parser() -> argparse.ArgumentParser:
     export_check = subparsers.add_parser("export-check", help="verify a materialized variant export package")
     export_check.add_argument("package_manifest", type=Path)
     export_check.add_argument("--output-root", type=Path, required=True)
+    paper_plan = subparsers.add_parser("paper-plan", help="compile two verified packages into a deterministic scene plan")
+    paper_plan.add_argument("cue_sheet", type=Path)
+    paper_plan.add_argument("--package-root", type=Path, required=True)
+    paper_plan.add_argument("--write", type=Path)
+    paper_check = subparsers.add_parser("paper-check", help="verify a deterministic paper-theater scene plan")
+    paper_check.add_argument("scene_plan", type=Path)
+    paper_check.add_argument("--package-root", type=Path, required=True)
     return parser
 
 
@@ -126,6 +134,29 @@ def main(argv: list[str] | None = None) -> int:
             return _emit(
                 {"ok": False, "diagnostics": [{"code": "EXPORT_ERROR", "message": str(exc), "field": ""}]},
                 "export operation failed",
+                False,
+            )
+
+    if args.command in {"paper-plan", "paper-check"}:
+        try:
+            if args.command == "paper-plan":
+                result = plan_scene(args.cue_sheet, args.package_root, write_path=args.write)
+                summary = f"planned {len(result['scene_plan']['segments'])} paper-theater segment(s)"
+                if args.write is not None:
+                    summary = ("wrote" if result["written"] else "verified existing") + summary[len("planned"):]
+                return _emit(result, summary, True)
+            result = check_scene_plan(args.scene_plan, args.package_root)
+            return _emit(result, f"verified scene plan with {result['segment_count']} segment(s)", True)
+        except PaperTheaterError as exc:
+            return _emit(
+                {"ok": False, "diagnostics": [exc.to_dict()]},
+                f"paper-theater validation failed: {exc.code}",
+                False,
+            )
+        except OSError as exc:
+            return _emit(
+                {"ok": False, "diagnostics": [{"code": "PAPER_THEATER_ERROR", "message": str(exc), "field": ""}]},
+                "paper-theater operation failed",
                 False,
             )
 
