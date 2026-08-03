@@ -67,6 +67,19 @@ def filtered_png(width: int, height: int, pixels: bytes, filter_type: int) -> by
     return PNG_SIGNATURE + chunk(b"IHDR", ihdr) + chunk(b"sRGB", b"\x00") + chunk(b"IDAT", zlib.compress(bytes(rows), 9)) + chunk(b"IEND", b"")
 
 
+def rgba_png_with_chunk(kind: bytes, data: bytes = b"") -> bytes:
+    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0)
+    raw = bytes((0, 1, 2, 3, 4))
+    return (
+        PNG_SIGNATURE
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"sRGB", b"\x00")
+        + chunk(kind, data)
+        + chunk(b"IDAT", zlib.compress(raw, 9))
+        + chunk(b"IEND", b"")
+    )
+
+
 class FrameRendererTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -234,6 +247,26 @@ class FrameRendererTests(unittest.TestCase):
             decode_rgba_png(filtered_png(1, 1, bytes((1, 2, 3, 4)), 5))
         with self.assertRaisesRegex(FrameRenderError, "PNG_DIMENSION_MISMATCH"):
             decode_rgba_png(self.red, expected_width=2)
+
+    def test_png_decompression_and_chunk_validation_are_bounded(self) -> None:
+        ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0)
+        bomb = (
+            PNG_SIGNATURE
+            + chunk(b"IHDR", ihdr)
+            + chunk(b"sRGB", b"\x00")
+            + chunk(b"IDAT", zlib.compress(b"\x00" + b"\x01" * 1_000_000, 9))
+            + chunk(b"IEND", b"")
+        )
+        with self.assertRaisesRegex(FrameRenderError, "PNG_DECODE_LIMIT"):
+            decode_rgba_png(bomb)
+        for payload, code in (
+            (rgba_png_with_chunk(b"tRNS", b"\x00" * 6), "PNG_FORMAT"),
+            (rgba_png_with_chunk(b"1BAD"), "PNG_CHUNK_TYPE"),
+            (rgba_png_with_chunk(b"abca"), "PNG_CHUNK_RESERVED"),
+        ):
+            with self.subTest(code=code):
+                with self.assertRaisesRegex(FrameRenderError, code):
+                    decode_rgba_png(payload)
 
     def test_pixel_center_placement_alpha_and_z_order(self) -> None:
         assets = {
