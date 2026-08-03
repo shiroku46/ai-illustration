@@ -124,6 +124,10 @@ class AudioPreviewTests(unittest.TestCase):
         script = _js_bytes().decode("utf-8")
         self.assertIn("audio.currentTime*1000+data.offset_ms", script)
         self.assertIn("audio.play()", script)
+        self.assertIn("performance.now()", script)
+        self.assertIn("startPre", script)
+        self.assertIn("startWall('post'", script)
+        self.assertIn("if(mode==='audio')", script)
         self.assertNotIn("fetch(", script)
         self.assertNotIn("mediaDevices", script)
         self.assertNotIn("localStorage", script)
@@ -250,6 +254,24 @@ class AudioPreviewTests(unittest.TestCase):
                 offset_ms=0,
                 duration_policy="exact",
                 audio_license_status="reviewing",
+            )
+
+    def test_audio_preview_manifest_directory_symlink_fails_closed(self) -> None:
+        with self._patch_preview():
+            result = self._build(write=True)
+        package = self.output_root / result["audio_preview"]["id"]
+        alias = self.output_root / "alias"
+        try:
+            alias.symlink_to(package, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks are not supported")
+        with self.assertRaisesRegex(AudioPreviewError, "PATH_SYMLINK"):
+            check_audio_preview_package(
+                alias / AUDIO_PREVIEW_MANIFEST,
+                self.output_root,
+                self.preview_root,
+                self.package_root,
+                self.audio_root,
             )
 
 
