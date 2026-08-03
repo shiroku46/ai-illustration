@@ -14,6 +14,7 @@ from .exporter import ExportError, build_export_package, check_export_package
 from .models import load_manifest
 from .paper_theater import PaperTheaterError, check_scene_plan, plan_scene
 from .preview import PreviewError, build_preview_package, check_preview_package
+from .render_plan import RenderPlanError, build_render_plan_package, check_render_plan_package
 from .review_ui import ReviewUIError, run_review_ui
 from .validation import validate_path
 from .variants import VariantError, check_variant_set, load_json_object as load_variant_json, plan_variant_set
@@ -95,6 +96,23 @@ def build_parser() -> argparse.ArgumentParser:
     audio_check.add_argument("--preview-root", type=Path, required=True)
     audio_check.add_argument("--package-root", type=Path, required=True)
     audio_check.add_argument("--audio-root", type=Path, required=True)
+    render_plan = subparsers.add_parser("render-plan", help="plan or write a deterministic renderer-neutral final render package")
+    render_plan.add_argument("audio_preview_manifest", type=Path)
+    render_plan.add_argument("--audio-preview-root", type=Path, required=True)
+    render_plan.add_argument("--preview-root", type=Path, required=True)
+    render_plan.add_argument("--package-root", type=Path, required=True)
+    render_plan.add_argument("--audio-root", type=Path, required=True)
+    render_plan.add_argument("--output-root", type=Path, required=True)
+    render_plan.add_argument("--fps-num", type=int, required=True)
+    render_plan.add_argument("--fps-den", type=int, required=True)
+    render_plan.add_argument("--write", action="store_true")
+    render_check = subparsers.add_parser("render-plan-check", help="verify a deterministic renderer-neutral render-plan package")
+    render_check.add_argument("render_plan_manifest", type=Path)
+    render_check.add_argument("--output-root", type=Path, required=True)
+    render_check.add_argument("--audio-preview-root", type=Path, required=True)
+    render_check.add_argument("--preview-root", type=Path, required=True)
+    render_check.add_argument("--package-root", type=Path, required=True)
+    render_check.add_argument("--audio-root", type=Path, required=True)
     return parser
 
 
@@ -112,11 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "validate":
         diagnostics = validate_path(args.path)
-        return _emit(
-            {"ok": not diagnostics, "diagnostic_count": len(diagnostics), "diagnostics": [item.to_dict() for item in diagnostics]},
-            "validation succeeded" if not diagnostics else f"validation failed with {len(diagnostics)} diagnostic(s)",
-            not diagnostics,
-        )
+        return _emit({"ok": not diagnostics, "diagnostic_count": len(diagnostics), "diagnostics": [item.to_dict() for item in diagnostics]}, "validation succeeded" if not diagnostics else f"validation failed with {len(diagnostics)} diagnostic(s)", not diagnostics)
 
     if args.command in {"variant-plan", "variant-check"}:
         try:
@@ -134,14 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in {"variant-export", "export-check"}:
         try:
             if args.command == "variant-export":
-                result = build_export_package(
-                    args.variant_set,
-                    args.manifest_root,
-                    args.source_root,
-                    args.output_root,
-                    approval_root=args.approval_root,
-                    write=args.write,
-                )
+                result = build_export_package(args.variant_set, args.manifest_root, args.source_root, args.output_root, approval_root=args.approval_root, write=args.write)
                 action = "materialized" if args.write else "planned"
                 return _emit(result, f"{action} {len(result['package']['items'])} verified variant export(s)", True)
             result = check_export_package(args.package_manifest, args.output_root)
@@ -182,32 +189,28 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in {"audio-preview-plan", "audio-preview-check"}:
         try:
             if args.command == "audio-preview-plan":
-                result = build_audio_preview_package(
-                    args.preview_manifest,
-                    args.preview_root,
-                    args.package_root,
-                    args.audio,
-                    args.audio_root,
-                    args.output_root,
-                    offset_ms=args.offset_ms,
-                    duration_policy=args.duration_policy,
-                    audio_license_status=args.audio_license_status,
-                    write=args.write,
-                )
+                result = build_audio_preview_package(args.preview_manifest, args.preview_root, args.package_root, args.audio, args.audio_root, args.output_root, offset_ms=args.offset_ms, duration_policy=args.duration_policy, audio_license_status=args.audio_license_status, write=args.write)
                 action = "materialized" if args.write else "planned"
                 return _emit(result, f"{action} WAV-bound offline preview with {result['file_count']} file(s)", True)
-            result = check_audio_preview_package(
-                args.audio_preview_manifest,
-                args.output_root,
-                args.preview_root,
-                args.package_root,
-                args.audio_root,
-            )
+            result = check_audio_preview_package(args.audio_preview_manifest, args.output_root, args.preview_root, args.package_root, args.audio_root)
             return _emit(result, f"verified WAV-bound offline preview with {result['segment_count']} segment(s)", True)
         except AudioPreviewError as exc:
             return _emit({"ok": False, "diagnostics": [exc.to_dict()]}, f"audio preview validation failed: {exc.code}", False)
         except OSError as exc:
             return _emit({"ok": False, "diagnostics": [{"code": "AUDIO_PREVIEW_ERROR", "message": str(exc), "field": ""}]}, "audio preview operation failed", False)
+
+    if args.command in {"render-plan", "render-plan-check"}:
+        try:
+            if args.command == "render-plan":
+                result = build_render_plan_package(args.audio_preview_manifest, args.audio_preview_root, args.preview_root, args.package_root, args.audio_root, args.output_root, fps_num=args.fps_num, fps_den=args.fps_den, write=args.write)
+                action = "materialized" if args.write else "planned"
+                return _emit(result, f"{action} renderer-neutral plan with {result['render_plan']['frame_count']} frame(s)", True)
+            result = check_render_plan_package(args.render_plan_manifest, args.output_root, args.audio_preview_root, args.preview_root, args.package_root, args.audio_root)
+            return _emit(result, f"verified render plan with {result['frame_count']} frame(s) and {result['span_count']} span(s)", True)
+        except RenderPlanError as exc:
+            return _emit({"ok": False, "diagnostics": [exc.to_dict()]}, f"render-plan validation failed: {exc.code}", False)
+        except OSError as exc:
+            return _emit({"ok": False, "diagnostics": [{"code": "RENDER_PLAN_ERROR", "message": str(exc), "field": ""}]}, "render-plan operation failed", False)
 
     if args.command == "review-ui":
         try:
@@ -234,11 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     catalog_path = args.path if args.command != "catalog-compat" else args.catalog
     profiles, diagnostics = load_catalog(catalog_path)
     if args.command == "catalog-validate":
-        return _emit(
-            {"ok": not diagnostics, "profile_count": len(profiles), "diagnostic_count": len(diagnostics), "diagnostics": [item.to_dict() for item in diagnostics]},
-            "catalog validation succeeded" if not diagnostics else f"catalog validation failed with {len(diagnostics)} diagnostic(s)",
-            not diagnostics,
-        )
+        return _emit({"ok": not diagnostics, "profile_count": len(profiles), "diagnostic_count": len(diagnostics), "diagnostics": [item.to_dict() for item in diagnostics]}, "catalog validation succeeded" if not diagnostics else f"catalog validation failed with {len(diagnostics)} diagnostic(s)", not diagnostics)
     if diagnostics:
         return _emit({"ok": False, "diagnostic_count": len(diagnostics), "diagnostics": [item.to_dict() for item in diagnostics]}, f"catalog validation failed with {len(diagnostics)} diagnostic(s)", False)
     if args.command == "catalog-list":
