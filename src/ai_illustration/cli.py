@@ -12,6 +12,7 @@ from .catalog import catalog_listing, evaluate_compatibility, load_catalog, vali
 from .exporter import ExportError, build_export_package, check_export_package
 from .models import load_manifest
 from .paper_theater import PaperTheaterError, check_scene_plan, plan_scene
+from .preview import PreviewError, build_preview_package, check_preview_package
 from .review_ui import ReviewUIError, run_review_ui
 from .validation import validate_path
 from .variants import VariantError, check_variant_set, load_json_object as load_variant_json, plan_variant_set
@@ -69,6 +70,17 @@ def build_parser() -> argparse.ArgumentParser:
     paper_check = subparsers.add_parser("paper-check", help="verify a deterministic paper-theater scene plan")
     paper_check.add_argument("scene_plan", type=Path)
     paper_check.add_argument("--package-root", type=Path, required=True)
+    preview_plan = subparsers.add_parser("preview-plan", help="plan or write a deterministic offline preview package")
+    preview_plan.add_argument("scene_plan", type=Path)
+    preview_plan.add_argument("--package-root", type=Path, required=True)
+    preview_plan.add_argument("--output-root", type=Path, required=True)
+    preview_plan.add_argument("--width", type=int, required=True)
+    preview_plan.add_argument("--height", type=int, required=True)
+    preview_plan.add_argument("--write", action="store_true")
+    preview_check = subparsers.add_parser("preview-check", help="verify a deterministic offline preview package")
+    preview_check.add_argument("preview_manifest", type=Path)
+    preview_check.add_argument("--output-root", type=Path, required=True)
+    preview_check.add_argument("--package-root", type=Path, required=True)
     return parser
 
 
@@ -157,6 +169,34 @@ def main(argv: list[str] | None = None) -> int:
             return _emit(
                 {"ok": False, "diagnostics": [{"code": "PAPER_THEATER_ERROR", "message": str(exc), "field": ""}]},
                 "paper-theater operation failed",
+                False,
+            )
+
+    if args.command in {"preview-plan", "preview-check"}:
+        try:
+            if args.command == "preview-plan":
+                result = build_preview_package(
+                    args.scene_plan,
+                    args.package_root,
+                    args.output_root,
+                    width=args.width,
+                    height=args.height,
+                    write=args.write,
+                )
+                action = "materialized" if args.write else "planned"
+                return _emit(result, f"{action} offline preview with {result['file_count']} file(s)", True)
+            result = check_preview_package(args.preview_manifest, args.output_root, args.package_root)
+            return _emit(result, f"verified offline preview with {result['segment_count']} segment(s)", True)
+        except PreviewError as exc:
+            return _emit(
+                {"ok": False, "diagnostics": [exc.to_dict()]},
+                f"preview validation failed: {exc.code}",
+                False,
+            )
+        except OSError as exc:
+            return _emit(
+                {"ok": False, "diagnostics": [{"code": "PREVIEW_ERROR", "message": str(exc), "field": ""}]},
+                "preview operation failed",
                 False,
             )
 
