@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "paper-theater-audio-preview.schema.json",
+  "title": "Paper theater audio preview package",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "kind", "schema_version", "source_preview_ref", "source_preview_path", "source_preview_sha256", "scene_plan_ref", "intent", "width", "height", "scene_duration_ms", "offset_ms", "duration_policy", "duration_tolerance_ms", "synchronized_audio_end_ms", "clock", "roles", "segments", "assets", "audio", "files"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^paper-theater-audio-preview-[0-9a-f]{20}$"},
+    "kind": {"const": "paper-theater-audio-preview"},
+    "schema_version": {"const": "1.0"},
+    "source_preview_ref": {"type": "string", "pattern": "^paper-theater-preview-[0-9a-f]{20}$"},
+    "source_preview_path": {"$ref": "#/$defs/path"},
+    "source_preview_sha256": {"$ref": "#/$defs/sha256"},
+    "scene_plan_ref": {"type": "string", "minLength": 1},
+    "intent": {"enum": ["evaluation", "production"]},
+    "width": {"type": "integer", "minimum": 1, "maximum": 8192},
+    "height": {"type": "integer", "minimum": 1, "maximum": 8192},
+    "scene_duration_ms": {"type": "integer", "minimum": 1, "maximum": 86400000},
+    "offset_ms": {"type": "integer", "minimum": -86400000, "maximum": 86400000},
+    "duration_policy": {"enum": ["exact", "audio-at-least-scene", "scene-at-least-audio"]},
+    "duration_tolerance_ms": {"const": 5},
+    "synchronized_audio_end_ms": {"type": "integer"},
+    "clock": {"const": "audio-current-time"},
+    "roles": {"type": "object"},
+    "segments": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+    "assets": {"type": "array", "items": {"$ref": "#/$defs/file"}},
+    "audio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_path", "path", "sha256", "size", "license_status", "container", "riff_format", "declared_format_tag", "format_tag", "encoding", "channels", "sample_rate", "bits_per_sample", "block_align", "byte_rate", "frame_count", "data_offset", "data_size", "duration_ms", "duration_frames", "duration_rate", "chunks"],
+      "properties": {
+        "source_path": {"$ref": "#/$defs/path"},
+        "path": {"type": "string", "pattern": "^audio/[0-9a-f]{64}\\.wav$"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size": {"type": "integer", "minimum": 1, "maximum": 536870912},
+        "license_status": {"enum": ["unreviewed", "reviewing", "approved", "rejected"]},
+        "container": {"const": "wav"},
+        "riff_format": {"const": "RIFF/WAVE"},
+        "declared_format_tag": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "format_tag": {"enum": [1, 3]},
+        "encoding": {"enum": ["pcm", "ieee-float"]},
+        "channels": {"type": "integer", "minimum": 1, "maximum": 8},
+        "sample_rate": {"type": "integer", "minimum": 8000, "maximum": 192000},
+        "bits_per_sample": {"enum": [8, 16, 24, 32, 64]},
+        "block_align": {"type": "integer", "minimum": 1},
+        "byte_rate": {"type": "integer", "minimum": 1},
+        "frame_count": {"type": "integer", "minimum": 1},
+        "data_offset": {"type": "integer", "minimum": 1},
+        "data_size": {"type": "integer", "minimum": 1},
+        "duration_ms": {"type": "integer", "minimum": 1, "maximum": 86400000},
+        "duration_frames": {"type": "integer", "minimum": 1},
+        "duration_rate": {"type": "integer", "minimum": 8000, "maximum": 192000},
+        "chunks": {"type": "array", "minItems": 2, "items": {"type": "string", "minLength": 4, "maxLength": 4}}
+      }
+    },
+    "files": {"type": "array", "minItems": 5, "items": {"$ref": "#/$defs/file"}}
+  },
+  "allOf": [{"if": {"properties": {"intent": {"const": "production"}}}, "then": {"properties": {"audio": {"properties": {"license_status": {"const": "approved"}}}}}}],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"},
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "size"],
+      "properties": {
+        "path": {"$ref": "#/$defs/path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

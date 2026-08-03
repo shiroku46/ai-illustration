@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 
 from .adapters import AdapterError, ComfyUIAdapter, load_json_object
+from .audio_preview import AudioPreviewError, build_audio_preview_package, check_audio_preview_package
 from .catalog import catalog_listing, evaluate_compatibility, load_catalog, validate_hardware_profile
 from .exporter import ExportError, build_export_package, check_export_package
 from .models import load_manifest
@@ -54,11 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
     variant_export.add_argument("--manifest-root", type=Path, required=True)
     variant_export.add_argument("--source-root", type=Path, required=True)
     variant_export.add_argument("--output-root", type=Path, required=True)
-    variant_export.add_argument(
-        "--approval-root",
-        type=Path,
-        help="production only: one canonical byte-bound accept review JSON per variant ID",
-    )
+    variant_export.add_argument("--approval-root", type=Path, help="production only: one canonical byte-bound accept review JSON per variant ID")
     variant_export.add_argument("--write", action="store_true")
     export_check = subparsers.add_parser("export-check", help="verify a materialized variant export package")
     export_check.add_argument("package_manifest", type=Path)
@@ -81,6 +78,23 @@ def build_parser() -> argparse.ArgumentParser:
     preview_check.add_argument("preview_manifest", type=Path)
     preview_check.add_argument("--output-root", type=Path, required=True)
     preview_check.add_argument("--package-root", type=Path, required=True)
+    audio_plan = subparsers.add_parser("audio-preview-plan", help="plan or write a deterministic WAV-bound offline preview")
+    audio_plan.add_argument("preview_manifest", type=Path)
+    audio_plan.add_argument("--preview-root", type=Path, required=True)
+    audio_plan.add_argument("--package-root", type=Path, required=True)
+    audio_plan.add_argument("--audio", required=True, help="POSIX-relative WAV path beneath --audio-root")
+    audio_plan.add_argument("--audio-root", type=Path, required=True)
+    audio_plan.add_argument("--output-root", type=Path, required=True)
+    audio_plan.add_argument("--offset-ms", type=int, required=True)
+    audio_plan.add_argument("--duration-policy", choices=("exact", "audio-at-least-scene", "scene-at-least-audio"), required=True)
+    audio_plan.add_argument("--audio-license-status", choices=("unreviewed", "reviewing", "approved", "rejected"), required=True)
+    audio_plan.add_argument("--write", action="store_true")
+    audio_check = subparsers.add_parser("audio-preview-check", help="verify a deterministic WAV-bound offline preview")
+    audio_check.add_argument("audio_preview_manifest", type=Path)
+    audio_check.add_argument("--output-root", type=Path, required=True)
+    audio_check.add_argument("--preview-root", type=Path, required=True)
+    audio_check.add_argument("--package-root", type=Path, required=True)
+    audio_check.add_argument("--audio-root", type=Path, required=True)
     return parser
 
 
@@ -115,11 +129,7 @@ def main(argv: list[str] | None = None) -> int:
                 summary = f"validated {len(plan['variants'])} reviewed variant(s)"
             return _emit({"ok": True, "variant_set": plan}, summary, True)
         except VariantError as exc:
-            return _emit(
-                {"ok": False, "diagnostics": [exc.to_dict()]},
-                f"variant validation failed: {exc.code}",
-                False,
-            )
+            return _emit({"ok": False, "diagnostics": [exc.to_dict()]}, f"variant validation failed: {exc.code}", False)
 
     if args.command in {"variant-export", "export-check"}:
         try:
@@ -137,17 +147,9 @@ def main(argv: list[str] | None = None) -> int:
             result = check_export_package(args.package_manifest, args.output_root)
             return _emit(result, f"verified export package with {result['file_count']} file(s)", True)
         except ExportError as exc:
-            return _emit(
-                {"ok": False, "diagnostics": [exc.to_dict()]},
-                f"export validation failed: {exc.code}",
-                False,
-            )
+            return _emit({"ok": False, "diagnostics": [exc.to_dict()]}, f"export validation failed: {exc.code}", False)
         except (OSError, ValueError) as exc:
-            return _emit(
-                {"ok": False, "diagnostics": [{"code": "EXPORT_ERROR", "message": str(exc), "field": ""}]},
-                "export operation failed",
-                False,
-            )
+            return _emit({"ok": False, "diagnostics": [{"code": "EXPORT_ERROR", "message": str(exc), "field": ""}]}, "export operation failed", False)
 
     if args.command in {"paper-plan", "paper-check"}:
         try:
@@ -160,56 +162,59 @@ def main(argv: list[str] | None = None) -> int:
             result = check_scene_plan(args.scene_plan, args.package_root)
             return _emit(result, f"verified scene plan with {result['segment_count']} segment(s)", True)
         except PaperTheaterError as exc:
-            return _emit(
-                {"ok": False, "diagnostics": [exc.to_dict()]},
-                f"paper-theater validation failed: {exc.code}",
-                False,
-            )
+            return _emit({"ok": False, "diagnostics": [exc.to_dict()]}, f"paper-theater validation failed: {exc.code}", False)
         except OSError as exc:
-            return _emit(
-                {"ok": False, "diagnostics": [{"code": "PAPER_THEATER_ERROR", "message": str(exc), "field": ""}]},
-                "paper-theater operation failed",
-                False,
-            )
+            return _emit({"ok": False, "diagnostics": [{"code": "PAPER_THEATER_ERROR", "message": str(exc), "field": ""}]}, "paper-theater operation failed", False)
 
     if args.command in {"preview-plan", "preview-check"}:
         try:
             if args.command == "preview-plan":
-                result = build_preview_package(
-                    args.scene_plan,
-                    args.package_root,
-                    args.output_root,
-                    width=args.width,
-                    height=args.height,
-                    write=args.write,
-                )
+                result = build_preview_package(args.scene_plan, args.package_root, args.output_root, width=args.width, height=args.height, write=args.write)
                 action = "materialized" if args.write else "planned"
                 return _emit(result, f"{action} offline preview with {result['file_count']} file(s)", True)
             result = check_preview_package(args.preview_manifest, args.output_root, args.package_root)
             return _emit(result, f"verified offline preview with {result['segment_count']} segment(s)", True)
         except PreviewError as exc:
-            return _emit(
-                {"ok": False, "diagnostics": [exc.to_dict()]},
-                f"preview validation failed: {exc.code}",
-                False,
-            )
+            return _emit({"ok": False, "diagnostics": [exc.to_dict()]}, f"preview validation failed: {exc.code}", False)
         except OSError as exc:
-            return _emit(
-                {"ok": False, "diagnostics": [{"code": "PREVIEW_ERROR", "message": str(exc), "field": ""}]},
-                "preview operation failed",
-                False,
+            return _emit({"ok": False, "diagnostics": [{"code": "PREVIEW_ERROR", "message": str(exc), "field": ""}]}, "preview operation failed", False)
+
+    if args.command in {"audio-preview-plan", "audio-preview-check"}:
+        try:
+            if args.command == "audio-preview-plan":
+                result = build_audio_preview_package(
+                    args.preview_manifest,
+                    args.preview_root,
+                    args.package_root,
+                    args.audio,
+                    args.audio_root,
+                    args.output_root,
+                    offset_ms=args.offset_ms,
+                    duration_policy=args.duration_policy,
+                    audio_license_status=args.audio_license_status,
+                    write=args.write,
+                )
+                action = "materialized" if args.write else "planned"
+                return _emit(result, f"{action} WAV-bound offline preview with {result['file_count']} file(s)", True)
+            result = check_audio_preview_package(
+                args.audio_preview_manifest,
+                args.output_root,
+                args.preview_root,
+                args.package_root,
+                args.audio_root,
             )
+            return _emit(result, f"verified WAV-bound offline preview with {result['segment_count']} segment(s)", True)
+        except AudioPreviewError as exc:
+            return _emit({"ok": False, "diagnostics": [exc.to_dict()]}, f"audio preview validation failed: {exc.code}", False)
+        except OSError as exc:
+            return _emit({"ok": False, "diagnostics": [{"code": "AUDIO_PREVIEW_ERROR", "message": str(exc), "field": ""}]}, "audio preview operation failed", False)
 
     if args.command == "review-ui":
         try:
             run_review_ui(args.manifest_root, args.asset_root, args.port)
             return 0
         except (OSError, ReviewUIError) as exc:
-            return _emit(
-                {"ok": False, "diagnostics": [{"code": "REVIEW_UI_ERROR", "message": str(exc)}]},
-                "review UI could not start",
-                False,
-            )
+            return _emit({"ok": False, "diagnostics": [{"code": "REVIEW_UI_ERROR", "message": str(exc)}]}, "review UI could not start", False)
 
     if args.command in {"adapter-check", "adapter-plan"}:
         adapter = ComfyUIAdapter()
@@ -235,11 +240,7 @@ def main(argv: list[str] | None = None) -> int:
             not diagnostics,
         )
     if diagnostics:
-        return _emit(
-            {"ok": False, "diagnostic_count": len(diagnostics), "diagnostics": [item.to_dict() for item in diagnostics]},
-            f"catalog validation failed with {len(diagnostics)} diagnostic(s)",
-            False,
-        )
+        return _emit({"ok": False, "diagnostic_count": len(diagnostics), "diagnostics": [item.to_dict() for item in diagnostics]}, f"catalog validation failed with {len(diagnostics)} diagnostic(s)", False)
     if args.command == "catalog-list":
         listing = catalog_listing(profiles)
         return _emit({"ok": True, "profile_count": len(listing), "profiles": listing}, f"listed {len(listing)} profile(s)", True)
@@ -247,18 +248,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         hardware = load_manifest(args.hardware).data
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
-        return _emit(
-            {"ok": False, "diagnostic_count": 1, "diagnostics": [{"code": "LOAD_ERROR", "message": str(exc), "document": str(args.hardware), "field": "", "severity": "error"}]},
-            "hardware profile could not be loaded",
-            False,
-        )
+        return _emit({"ok": False, "diagnostic_count": 1, "diagnostics": [{"code": "LOAD_ERROR", "message": str(exc), "document": str(args.hardware), "field": "", "severity": "error"}]}, "hardware profile could not be loaded", False)
     hardware_diagnostics = validate_hardware_profile(args.hardware, hardware)
     if hardware_diagnostics:
-        return _emit(
-            {"ok": False, "diagnostic_count": len(hardware_diagnostics), "diagnostics": [item.to_dict() for item in hardware_diagnostics]},
-            f"hardware validation failed with {len(hardware_diagnostics)} diagnostic(s)",
-            False,
-        )
+        return _emit({"ok": False, "diagnostic_count": len(hardware_diagnostics), "diagnostics": [item.to_dict() for item in hardware_diagnostics]}, f"hardware validation failed with {len(hardware_diagnostics)} diagnostic(s)", False)
     results = [evaluate_compatibility(profile, hardware).to_dict() for profile in profiles]
     return _emit({"ok": True, "hardware_id": hardware["id"], "results": results}, f"evaluated {len(results)} profile(s)", True)
 
