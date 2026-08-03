@@ -1,0 +1,92 @@
+{
+  "id": "paper-theater-render-plan-11111111111111111111",
+  "kind": "paper-theater-render-plan",
+  "schema_version": "1.0",
+  "source_bindings": {
+    "audio_preview": {
+      "id": "paper-theater-audio-preview-22222222222222222222",
+      "path": "paper-theater-audio-preview-22222222222222222222/audio-preview-manifest.json",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "intent": "evaluation",
+  "audio_license_status": "reviewing",
+  "width": 1280,
+  "height": 720,
+  "scene_duration_ms": 1000,
+  "fps_num": 24,
+  "fps_den": 1,
+  "frame_time_unit": "milliseconds",
+  "frame_boundary_policy": "state-at-frame-start",
+  "frame_count": 1,
+  "frames": [
+    {
+      "index": 0,
+      "start_time_num": 0,
+      "end_time_num": 24000,
+      "time_den": 24,
+      "boke": {
+        "key": "boke.neutral",
+        "variant_id": "variant-boke-neutral",
+        "asset_path": "assets/boke.png",
+        "png_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "stage_slot": "left"
+      },
+      "tsukkomi": {
+        "key": "tsukkomi.neutral",
+        "variant_id": "variant-tsukkomi-neutral",
+        "asset_path": "assets/tsukkomi.png",
+        "png_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "stage_slot": "right"
+      }
+    }
+  ],
+  "spans": [
+    {
+      "start_frame": 0,
+      "end_frame": 1,
+      "start_time_num": 0,
+      "end_time_num": 24000,
+      "time_den": 24,
+      "boke": {
+        "key": "boke.neutral",
+        "variant_id": "variant-boke-neutral",
+        "asset_path": "assets/boke.png",
+        "png_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "stage_slot": "left"
+      },
+      "tsukkomi": {
+        "key": "tsukkomi.neutral",
+        "variant_id": "variant-tsukkomi-neutral",
+        "asset_path": "assets/tsukkomi.png",
+        "png_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "stage_slot": "right"
+      }
+    }
+  ],
+  "audio_placement": {
+    "policy": "signed-rational-sample-offset-no-resampling",
+    "offset_ms": 0,
+    "start_sample_num": 0,
+    "start_sample_den": 1000,
+    "source_sample_rate": 48000,
+    "source_frame_count": 48000,
+    "duration_policy": "exact",
+    "synchronized_audio_end_ms": 1000
+  },
+  "output_target": {
+    "kind": "renderer-neutral-media-target",
+    "video_container": "unspecified",
+    "video_codec": "unspecified",
+    "audio_codec": "copy-or-renderer-defined",
+    "pixel_width": 1280,
+    "pixel_height": 720,
+    "frame_count": 1,
+    "media_created": false
+  },
+  "files": [
+    {"path": "frame-inventory.json", "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "size": 1},
+    {"path": "render-spans.json", "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "size": 1},
+    {"path": "source-bindings.json", "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "size": 1}
+  ]
+}
