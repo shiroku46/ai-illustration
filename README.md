@@ -11,11 +11,12 @@ The repository defines product, architecture, style, and asset contracts and inc
 - a non-executing ComfyUI API-workflow adapter that validates workflows and creates dry-run execution plans;
 - a read-only local candidate comparison UI that exports structured review-decision JSON in the browser;
 - deterministic expression/pose variant-set planning bound to one accepted candidate identity;
-- deterministic packaging of caller-supplied local variant PNGs by verified byte copy, with sidecars and a paper-theater lookup index.
+- deterministic packaging of caller-supplied local variant PNGs by verified byte copy, with sidecars and a paper-theater lookup index;
+- deterministic paper-theater scene, offline preview, WAV synchronization, and renderer-neutral final render-plan compilation.
 
-It does **not** install a model, start ComfyUI, contact a server, generate, edit, resize, or re-encode images. Export packaging reads local PNGs, verifies them, and copies their bytes unchanged only when `--write` is explicitly supplied.
+It does **not** install a model, start ComfyUI, contact a server, generate, edit, resize, re-encode, or render media. Export packaging reads local PNGs and WAV files, verifies them, and copies their bytes unchanged only when `--write` is explicitly supplied. Render plans are text-only and never contain an executable renderer command.
 
-Six production manifest types are supported: character specification, style profile, generation request, candidate asset, review decision, and export manifest. Variant-set plans and variant export packages are additional deterministic documents for downstream production stages.
+Six production manifest types are supported: character specification, style profile, generation request, candidate asset, review decision, and export manifest. Variant-set plans, export packages, paper-theater scene plans, offline previews, audio previews, and render plans are additional deterministic documents for downstream production stages.
 
 The tool-evaluation catalog can validate synthetic tool/model profiles, list them deterministically, and compare declared hardware requirements with a local hardware profile. Compatibility never implies license or commercial-use approval.
 
@@ -43,10 +44,21 @@ PYTHONPATH=src python -m ai_illustration.cli variant-export path/to/variant-set.
 PYTHONPATH=src python -m ai_illustration.cli variant-export path/to/variant-set.json --manifest-root path/to/manifest-directory --source-root path/to/supplied-variant-pngs --output-root path/to/packages --write
 PYTHONPATH=src python -m ai_illustration.cli variant-export path/to/production-variant-set.json --manifest-root path/to/manifest-directory --source-root path/to/supplied-variant-pngs --approval-root path/to/variant-reviews --output-root path/to/packages --write
 PYTHONPATH=src python -m ai_illustration.cli export-check path/to/packages/variant-export-package-ID/package-manifest.json --output-root path/to/packages
+PYTHONPATH=src python -m ai_illustration.cli render-plan path/to/audio-previews/paper-theater-audio-preview-ID/audio-preview-manifest.json --audio-preview-root path/to/audio-previews --preview-root path/to/previews --package-root path/to/packages --audio-root path/to/audio --output-root path/to/render-plans --fps-num 30000 --fps-den 1001
+PYTHONPATH=src python -m ai_illustration.cli render-plan path/to/audio-previews/paper-theater-audio-preview-ID/audio-preview-manifest.json --audio-preview-root path/to/audio-previews --preview-root path/to/previews --package-root path/to/packages --audio-root path/to/audio --output-root path/to/render-plans --fps-num 30000 --fps-den 1001 --write
+PYTHONPATH=src python -m ai_illustration.cli render-plan-check path/to/render-plans/paper-theater-render-plan-ID/render-plan-manifest.json --output-root path/to/render-plans --audio-preview-root path/to/audio-previews --preview-root path/to/previews --package-root path/to/packages --audio-root path/to/audio
 PYTHONPATH=src python -m unittest discover -s tests
 ```
 
 Commands write deterministic machine-readable JSON to stdout, a short summary to stderr, and return nonzero for invalid data. The long-running `review-ui` command prints its local URL and stops with `Ctrl+C`.
+
+## Renderer-neutral final render plans
+
+`render-plan` first performs the complete current Phase 9 integrity check, including the upstream preview, scene/package, PNG, and local WAV bindings. It accepts a positive rational frame rate as `--fps-num` and `--fps-den`, uses integer arithmetic only, and rounds the total frame count upward so the final partial frame is never truncated.
+
+Every frame records an exact rational millisecond interval and uses the scene state at the frame start. Adjacent frames with identical boke/tsukkomi assets and stage slots are collapsed into deterministic spans. The plan preserves PNG and WAV checksums, signed rational audio-sample placement, synchronization policy, intent, licensing state, dimensions, and upstream provenance.
+
+Dry run is the default. `--write` atomically publishes only canonical JSON files in a content-addressed directory. Existing byte-identical output is accepted; differing, missing, extra, traversing, or symlinked files fail closed. `render-plan-check` rebuilds the expected plan from the currently verified Phase 9 package and rejects stale timing, spans, checksums, or source bindings. No video, image, or audio media is created.
 
 ## Local candidate review
 
@@ -110,4 +122,4 @@ The adapter distinguishes planning from authorization:
 - `execute()` is deliberately disabled;
 - no socket, subprocess, external request, model loading, or image output is performed.
 
-No compatibility, adapter, review, variant-planning, or export-packaging result grants a license or approves commercial use.
+No compatibility, adapter, review, variant-planning, export-packaging, preview, audio-preview, or render-plan result grants a license or approves commercial use.
