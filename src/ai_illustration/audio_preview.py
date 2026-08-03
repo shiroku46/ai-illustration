@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import hashlib
 import html
 import json
+import os
 from pathlib import Path
 import shutil
 import struct
@@ -241,12 +242,12 @@ def _validate_sync(scene_duration_ms: Any, audio_duration_ms: int, offset_ms: An
 def _preview_reference(preview_manifest: Path, preview_root: Path, package_root: Path) -> tuple[str, bytes, dict[str, Any], Path]:
     preview_root_resolved = _root(preview_root, must_exist=True, field="preview_root")
     expanded = preview_manifest.expanduser()
+    lexical = Path(os.path.abspath(expanded))
     try:
-        resolved = expanded.resolve(strict=True)
-    except OSError as exc:
-        raise AudioPreviewError("PREVIEW_MISSING", str(exc), "preview_manifest") from exc
-    if expanded.is_symlink() or not resolved.is_file() or not _within(preview_root_resolved, resolved):
-        raise AudioPreviewError("PREVIEW_PATH", "preview manifest must be a regular file beneath preview_root", "preview_manifest")
+        relative = lexical.relative_to(preview_root_resolved).as_posix()
+    except ValueError as exc:
+        raise AudioPreviewError("PREVIEW_PATH", "preview manifest must be beneath preview_root", "preview_manifest") from exc
+    normalized, resolved = _safe_existing_file(preview_root_resolved, relative, "preview_manifest")
     try:
         checked = check_preview_package(resolved, preview_root_resolved, package_root)
     except PreviewError as exc:
@@ -260,7 +261,7 @@ def _preview_reference(preview_manifest: Path, preview_root: Path, package_root:
     expected = preview_root_resolved / preview_id / PREVIEW_MANIFEST
     if resolved != expected.resolve():
         raise AudioPreviewError("PREVIEW_LOCATION", "preview manifest path is not canonical", "preview_manifest")
-    return resolved.relative_to(preview_root_resolved).as_posix(), resolved.read_bytes(), preview, expected.parent
+    return normalized, resolved.read_bytes(), preview, expected.parent
 
 
 def _copy_preview_assets(preview: dict[str, Any], source_dir: Path) -> tuple[list[dict[str, Any]], dict[str, bytes]]:
