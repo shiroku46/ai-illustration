@@ -233,6 +233,25 @@ class AudioPreviewTests(unittest.TestCase):
         with self.assertRaisesRegex(AudioPreviewError, "WAV_EXTENSIBLE"):
             _parse_wav(payload)
 
+    def test_preview_manifest_directory_symlink_fails_closed(self) -> None:
+        alias = self.preview_root / "alias"
+        try:
+            alias.symlink_to(self.preview_dir, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks are not supported")
+        with self._patch_preview(), self.assertRaisesRegex(AudioPreviewError, "PATH_SYMLINK"):
+            build_audio_preview_package(
+                alias / "preview-manifest.json",
+                self.preview_root,
+                self.package_root,
+                "voice.wav",
+                self.audio_root,
+                self.output_root,
+                offset_ms=0,
+                duration_policy="exact",
+                audio_license_status="reviewing",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
