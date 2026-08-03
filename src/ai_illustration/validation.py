@@ -227,6 +227,7 @@ def _parse_png(data: bytes) -> PngInfo:
         raise ValueError("invalid PNG signature")
     offset = len(PNG_SIGNATURE)
     width = height = channels = -1
+    color_type = -1
     seen_ihdr = seen_plte = seen_idat = seen_iend = seen_srgb = False
     idat_closed = False
     idat = bytearray()
@@ -272,6 +273,10 @@ def _parse_png(data: bytes) -> PngInfo:
         elif chunk_type == b"PLTE":
             if seen_plte or seen_idat:
                 raise ValueError("PLTE must be unique and precede IDAT")
+            if color_type == 4:
+                raise ValueError("PLTE is forbidden for grayscale-alpha PNG")
+            if length == 0 or length % 3 != 0 or length > 256 * 3:
+                raise ValueError("invalid PLTE length")
             seen_plte = True
         elif chunk_type == b"sRGB":
             if seen_srgb or seen_plte or seen_idat:
@@ -279,6 +284,8 @@ def _parse_png(data: bytes) -> PngInfo:
             if length != 1 or chunk_data[0] > 3:
                 raise ValueError("invalid sRGB chunk")
             seen_srgb = True
+        elif chunk_type == b"tRNS":
+            raise ValueError("tRNS is forbidden for alpha PNG")
         elif chunk_type == b"IDAT":
             if not seen_ihdr:
                 raise ValueError("IDAT precedes IHDR")
@@ -292,8 +299,8 @@ def _parse_png(data: bytes) -> PngInfo:
             seen_iend = True
             if chunk_end != len(data):
                 raise ValueError("trailing bytes after IEND")
-        elif chunk_type[:1].isupper():
-            raise ValueError(f"unsupported critical PNG chunk {chunk_type!r}")
+        else:
+            raise ValueError(f"unsupported PNG chunk {chunk_type!r}")
 
         offset = chunk_end
         chunk_index += 1

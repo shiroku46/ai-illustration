@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "paper-theater-index",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "kind", "schema_version", "variant_set_ref", "intent", "entries"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^paper-theater-index-[0-9a-f]{20}$"},
+    "kind": {"const": "paper-theater-index"},
+    "schema_version": {"const": "1.0"},
+    "variant_set_ref": {"type": "string", "pattern": "^variant-set-[0-9a-f]{20}$"},
+    "intent": {"enum": ["evaluation", "production"]},
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "variant_id", "png_path", "sidecar_path", "sha256"],
+        "properties": {
+          "key": {"type": "string", "pattern": "^[a-z0-9.-]+$"},
+          "variant_id": {"type": "string", "pattern": "^variant-[0-9a-f]{20}$"},
+          "png_path": {"type": "string", "pattern": "^variants/v1/.+\\.png$"},
+          "sidecar_path": {"type": "string", "pattern": "^variants/v1/.+\\.json$"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}
