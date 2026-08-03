@@ -199,6 +199,10 @@ def decode_rgba_png(payload: bytes, *, expected_width: int | None = None, expect
             raise FrameRenderError("PNG_STRUCTURE", "truncated PNG chunk", "png")
         length = struct.unpack(">I", payload[offset : offset + 4])[0]
         kind = payload[offset + 4 : offset + 8]
+        if len(kind) != 4 or any(not (65 <= byte <= 90 or 97 <= byte <= 122) for byte in kind):
+            raise FrameRenderError("PNG_CHUNK_TYPE", "PNG chunk type must contain four ASCII letters", "png")
+        if not 65 <= kind[2] <= 90:
+            raise FrameRenderError("PNG_CHUNK_RESERVED", "PNG chunk reserved bit must be zero", "png")
         if length > MAX_CHUNK_BYTES:
             raise FrameRenderError("PNG_CHUNK_LIMIT", "PNG chunk exceeds the configured limit", "png")
         end = offset + 12 + length
@@ -240,8 +244,8 @@ def decode_rgba_png(payload: bytes, *, expected_width: int | None = None, expect
         else:
             if seen_idat:
                 idat_closed = True
-            if kind == b"PLTE":
-                raise FrameRenderError("PNG_FORMAT", "PLTE is forbidden for RGBA input", "png")
+            if kind in {b"PLTE", b"tRNS"}:
+                raise FrameRenderError("PNG_FORMAT", f"{kind.decode('ascii')} is forbidden for RGBA input", "png")
             if kind and 65 <= kind[0] <= 90:
                 raise FrameRenderError("PNG_CRITICAL_CHUNK", f"unsupported critical chunk {kind!r}", "png")
         offset = end
@@ -262,9 +266,17 @@ def decode_rgba_png(payload: bytes, *, expected_width: int | None = None, expect
     decoder = zlib.decompressobj()
     try:
         raw = decoder.decompress(bytes(compressed), expected + 1)
-        raw += decoder.flush()
+        if len(raw) > expected or decoder.unconsumed_tail:
+            raise FrameRenderError("PNG_DECODE_LIMIT", "decoded PNG exceeds IHDR-derived length", "png")
+        remaining = expected - len(raw)
+        flushed = decoder.flush(max(1, remaining + 1))
+    except FrameRenderError:
+        raise
     except zlib.error as exc:
         raise FrameRenderError("PNG_ZLIB", str(exc), "png") from exc
+    if len(flushed) > remaining:
+        raise FrameRenderError("PNG_DECODE_LIMIT", "decoded PNG exceeds IHDR-derived length", "png")
+    raw += flushed
     if len(raw) != expected or not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:
         raise FrameRenderError("PNG_DECODE_LENGTH", "decoded PNG byte length is invalid", "png")
 
