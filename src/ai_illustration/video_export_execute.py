@@ -94,7 +94,8 @@ def run_video_export(
         shutil.rmtree(staging)
     try:
         staging.mkdir()
-        (staging / VIDEO_EXPORT_PLAN).write_bytes(plan_bytes)
+        stored_plan = staging / VIDEO_EXPORT_PLAN
+        stored_plan.write_bytes(plan_bytes)
         work = staging / "work"
         work.mkdir()
         _copy_bound_sources(work, source_files)
@@ -114,6 +115,8 @@ def run_video_export(
             raise VideoExportError("VIDEO_MISSING", "FFmpeg did not create the expected video", VIDEO_OUTPUT)
         video_sha, video_size = _sha_file(output_path, MAX_VIDEO_BYTES, VIDEO_OUTPUT)
         shutil.rmtree(work)
+        if stored_plan.is_symlink() or not stored_plan.is_file() or stored_plan.read_bytes() != plan_bytes:
+            raise VideoExportError("STAGING_PLAN_CHANGED", "stored export plan changed during execution", VIDEO_EXPORT_PLAN)
         core = {
             "kind": "paper-theater-video-export-package",
             "schema_version": "1.0",
@@ -153,6 +156,8 @@ def run_video_export(
             {VIDEO_EXPORT_MANIFEST, VIDEO_EXPORT_PLAN, VIDEO_OUTPUT},
             "STAGING_FILE_SET",
         )
+        if stored_plan.read_bytes() != plan_bytes:
+            raise VideoExportError("STAGING_PLAN_CHANGED", "stored export plan changed before publication", VIDEO_EXPORT_PLAN)
         if destination.exists():
             raise VideoExportError("OUTPUT_CONFLICT", "destination appeared during execution", "output_root")
         staging.replace(destination)
