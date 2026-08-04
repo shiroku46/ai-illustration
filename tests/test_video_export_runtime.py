@@ -34,19 +34,49 @@ class VideoExportRuntimeTests(VideoExportTestCase):
         from ai_illustration import video_export_process
         captured = {}
         real = video_export_process.subprocess.Popen
+
         class CapturingPopen:
             def __new__(cls, *args, **kwargs):
                 captured.update(kwargs)
                 return real(*args, **kwargs)
+
         original_frame = (self.package_dir / "frames/00000000.png").read_bytes()
         with patch.object(video_export_process.subprocess, "Popen", CapturingPopen):
             self.execute()
         self.assertIs(captured["shell"], False)
         self.assertNotIn("GITHUB_TOKEN", captured["env"])
+        self.assertNotIn("PATH", captured["env"])
         self.assertEqual(captured["env"]["LC_ALL"], "C")
-        self.assertEqual(Path(captured["cwd"]).name, "work")
-        self.assertNotEqual(Path(captured["cwd"]), self.package_dir.resolve())
+        work = Path(captured["cwd"]).resolve()
+        self.assertEqual(work.name, "work")
+        self.assertNotEqual(work, self.package_dir.resolve())
+        for key in ("HOME", "USERPROFILE", "TMP", "TEMP", "TMPDIR"):
+            self.assertEqual(Path(captured["env"][key]).resolve(), work)
         self.assertEqual((self.package_dir / "frames/00000000.png").read_bytes(), original_frame)
+
+    def test_existing_staging_conflict_is_preserved(self):
+        package_id = self.plan()["package_path"]
+        staging = self.output_root / f".{package_id}.tmp"
+        staging.mkdir(parents=True)
+        marker = staging / "keep.txt"
+        marker.write_text("owned elsewhere", encoding="utf-8")
+        with self.assertRaises(VideoExportError) as caught:
+            self.execute()
+        self.assertEqual(caught.exception.code, "STAGING_CONFLICT")
+        self.assertTrue(marker.is_file())
+        self.assertEqual(marker.read_text(encoding="utf-8"), "owned elsewhere")
+
+    def test_diagnostic_limit_is_shared_across_stdout_and_stderr(self):
+        self.ffmpeg.write_text(
+            f"#!{sys.executable}\nimport os,sys\nos.write(1,b'x'*10)\nos.write(2,b'y'*10)\nsys.exit(0)\n",
+            encoding="utf-8",
+        )
+        self.ffmpeg.chmod(self.ffmpeg.stat().st_mode | stat.S_IXUSR)
+        with patch("ai_illustration.video_export_process.MAX_DIAGNOSTIC_BYTES", 16):
+            with self.assertRaises(VideoExportError) as caught:
+                self.execute()
+        self.assertEqual(caught.exception.code, "FFMPEG_DIAGNOSTIC_LIMIT")
+        self.assertEqual(list(self.output_root.glob(".*.tmp")), [])
 
     def test_executable_cannot_publish_extra_staging_files(self):
         self.ffmpeg.write_text(
@@ -89,6 +119,32 @@ class VideoExportRuntimeTests(VideoExportTestCase):
                     self.profile_root,
                 )
         self.assertEqual(caught.exception.code, "VIDEO_MISMATCH")
+
+    def test_unknown_manifest_field_is_rejected(self):
+        result = self.execute()
+        destination = self.output_root / result["package_path"]
+        manifest_path = destination / VIDEO_EXPORT_MANIFEST
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["unexpected"] = True
+        manifest_path.write_bytes(canonical(manifest))
+        with patch("ai_illustration.video_export_source.check_frame_preview_package", return_value=self._checker_result()):
+            with self.assertRaises(VideoExportError) as caught:
+                check_video_export_package(
+                    manifest_path,
+                    self.profile_path,
+                    self.ffmpeg,
+                    self.output_root,
+                    self.frame_preview_root,
+                    self.frame_render_root,
+                    self.renderer_root,
+                    self.plan_root,
+                    self.audio_preview_root,
+                    self.preview_root,
+                    self.package_root,
+                    self.audio_root,
+                    self.profile_root,
+                )
+        self.assertEqual(caught.exception.code, "MANIFEST_SCHEMA")
 
     def test_timeout_and_oversize_failures_clean_staging(self):
         self.ffmpeg.write_text(

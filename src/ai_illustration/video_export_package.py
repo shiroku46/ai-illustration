@@ -11,6 +11,23 @@ from .video_export_common import (
     VideoExportError, _canonical_object, _json_bytes, _sha, _sha_file,
 )
 
+RESULT_MANIFEST_FIELDS = {
+    "id",
+    "kind",
+    "schema_version",
+    "plan",
+    "source_frame_preview",
+    "profile",
+    "ffmpeg",
+    "intent",
+    "audio_license_status",
+    "video",
+    "execution",
+    "reproducibility_scope",
+    "files",
+}
+
+
 def _package_id(plan: dict[str, Any]) -> str:
     return content_identifier("paper-theater-video-export-package", {"plan_ref": plan["id"]}, 20)
 
@@ -41,6 +58,13 @@ def _validate_result_manifest(
     video_sha: str,
     video_size: int,
 ) -> None:
+    if set(manifest) != RESULT_MANIFEST_FIELDS:
+        raise VideoExportError(
+            "MANIFEST_SCHEMA",
+            f"video export manifest fields differ; missing={sorted(RESULT_MANIFEST_FIELDS - set(manifest))} "
+            f"extra={sorted(set(manifest) - RESULT_MANIFEST_FIELDS)}",
+            VIDEO_EXPORT_MANIFEST,
+        )
     if manifest.get("id") != package_id or manifest.get("kind") != "paper-theater-video-export-package" or manifest.get("schema_version") != "1.0":
         raise VideoExportError("MANIFEST_BINDING_MISMATCH", "video export identity or schema changed", VIDEO_EXPORT_MANIFEST)
     expected_plan = {"id": plan["id"], "path": VIDEO_EXPORT_PLAN, "sha256": _sha(plan_bytes)}
