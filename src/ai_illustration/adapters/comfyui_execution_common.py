@@ -47,7 +47,10 @@ def source_file(path: Path, field: str, *, canonical_required: bool) -> tuple[di
     size = resolved.stat().st_size
     if size <= 0 or size > MAX_SOURCE_JSON_BYTES:
         raise AdapterError("SOURCE_SIZE", f"{field} exceeds the JSON size limit", field)
-    payload = resolved.read_bytes()
+    with resolved.open("rb") as handle:
+        payload = handle.read(MAX_SOURCE_JSON_BYTES + 1)
+    if len(payload) != size or len(payload) > MAX_SOURCE_JSON_BYTES:
+        raise AdapterError("SOURCE_SIZE_CHANGED", f"{field} changed size during bounded read", field)
 
     def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
