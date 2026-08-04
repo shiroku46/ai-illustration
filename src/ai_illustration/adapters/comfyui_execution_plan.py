@@ -18,7 +18,9 @@ from .comfyui_execution_common import (
     validate_catalog_profile,
     validate_execution_profile,
 )
+from ..models import Manifest
 from ..naming import content_identifier
+from ..validation import validate_document
 
 
 def prepare_execution(
@@ -39,14 +41,18 @@ def prepare_execution(
     execution, execution_bytes, execution_file = source_file(execution_profile_path, "execution_profile", canonical_required=True)
     if request.get("kind") != "generation-request" or request.get("schema_version") != "1.0":
         raise AdapterError("INVALID_REQUEST", "request must be a canonical generation-request", "request")
+    request_diagnostics = validate_document(Manifest(request_file, request))
+    if request_diagnostics:
+        first = request_diagnostics[0]
+        raise AdapterError("REQUEST_VALIDATION", f"{first.code}: {first.message}", first.field or "request")
     request_id = token(request.get("id"), "request.id")
     tool_id = token(request.get("tool_id"), "request.tool_id")
     model_id = token(request.get("model_id"), "request.model_id")
     integer(request.get("seed"), "request.seed", 0, 2**63 - 1)
     if request.get("license_status") != "approved":
         raise AdapterError("REQUEST_LICENSE", "request license_status must be approved", "request.license_status")
-    validate_catalog_profile(tool, expected_id=tool_id, profile_type="tool", field="tool_profile")
-    validate_catalog_profile(model, expected_id=model_id, profile_type="model-configuration", field="model_profile")
+    validate_catalog_profile(tool, source_path=tool_file, expected_id=tool_id, profile_type="tool", field="tool_profile")
+    validate_catalog_profile(model, source_path=model_file, expected_id=model_id, profile_type="model-configuration", field="model_profile")
     workflow_summary = validate_workflow(workflow)
     validate_execution_profile(execution, workflow_sha=sha256(workflow_bytes), tool_id=tool_id, model_id=model_id)
     bound_workflow, bound_values = bind_workflow(request, workflow, bindings)
