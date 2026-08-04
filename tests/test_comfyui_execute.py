@@ -167,6 +167,14 @@ class Tests(unittest.TestCase):
         png.write_bytes(original); (package/"extra.txt").write_text("x")
         with self.assertRaises(AdapterError) as c: check_comfyui_execution(package/MANIFEST_FILE,self.output,self.fixture.request,self.fixture.workflow,self.fixture.bindings,self.fixture.tool,self.fixture.model,self.fixture.execution,endpoint=self.endpoint)
         self.assertEqual(c.exception.code,"FILE_SET")
+    def test_checker_rejects_oversized_candidate_before_decode(self):
+        result=self.execute(); package=self.output/result["package_path"]
+        manifest=json.loads((package/MANIFEST_FILE).read_text())
+        png=package/manifest["candidates"][0]["path"]
+        png.write_bytes(b"x"*(1048576+1))
+        with self.assertRaises(AdapterError) as caught:
+            check_comfyui_execution(package/MANIFEST_FILE,self.output,self.fixture.request,self.fixture.workflow,self.fixture.bindings,self.fixture.tool,self.fixture.model,self.fixture.execution,endpoint=self.endpoint)
+        self.assertEqual(caught.exception.code,"CANDIDATE_BYTES")
     def test_profile_and_secret_fail_closed(self):
         model=json.loads(self.fixture.model.read_text()); model["decision_state"]="reviewing"; self.fixture.model.write_bytes(canonical(model))
         with self.assertRaises(AdapterError) as c: self.execute()
