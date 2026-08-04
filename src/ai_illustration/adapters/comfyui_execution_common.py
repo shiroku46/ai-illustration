@@ -164,15 +164,10 @@ def output_root(path: Path, sources: set[Path]) -> Path:
     if candidate.exists() and not candidate.is_dir():
         raise AdapterError("ROOT_TYPE", "output_root must be a directory", "output_root")
     for source in sources:
-        parent = source.parent.resolve(strict=False)
+        resolved = source.resolve(strict=False)
         try:
-            source.relative_to(candidate)
-            raise AdapterError("OUTPUT_OVERLAP", "output_root contains a source input", "output_root")
+            resolved.relative_to(candidate)
         except ValueError:
-            pass
-        try:
-            candidate.relative_to(parent)
-            raise AdapterError("OUTPUT_OVERLAP", "output_root is nested in a source directory", "output_root")
-        except ValueError:
-            pass
+            continue
+        raise AdapterError("OUTPUT_OVERLAP", "output_root contains a source input", "output_root")
     return candidate
