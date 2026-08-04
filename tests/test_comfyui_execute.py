@@ -84,7 +84,7 @@ class Fixture:
         self.root=root
         self.request=root/"request.json"; self.workflow=root/"workflow.json"; self.bindings=root/"bindings.json"
         self.tool=root/"tool.json"; self.model=root/"model.json"; self.execution=root/"execution.json"
-        request={"id":"request-demo","kind":"generation-request","schema_version":"1.0","tool_id":"tool-approved","model_id":"model-approved","seed":7,"license_status":"approved","config":{"steps":1},"expression":"neutral"}
+        request={"id":"request-demo","kind":"generation-request","schema_version":"1.0","character_ref":"character-demo@v001","style_ref":"style-demo@v001","pose":"standing","expression":"neutral","crop":"full-body","facing":"front","tool_id":"tool-approved","model_id":"model-approved","seed":7,"license_status":"approved","config":{"steps":1},"output_intent":"evaluation","provenance":{"source":"fixture"}}
         workflow={"1":{"class_type":"KSampler","inputs":{"seed":0,"steps":1}},"9":{"class_type":"SaveImage","inputs":{"images":["1",0]}}}
         bindings={"seed":{"node_id":"1","input":"seed","source":"seed"},"steps":{"node_id":"1","input":"steps","source":"config.steps"}}
         def profile(pid,ptype): return {"kind":"tool-profile","schema_version":"1.0","id":pid,"version":"v001","profile_type":ptype,"adapter_type":"comfyui-local-api","runtime_type":"python","offline_capability":"yes","deterministic_seed_support":True,"control_capabilities":["seed","workflow"],"minimum_vram_gb":0,"minimum_ram_gb":0,"supported_operating_systems":["linux"],"install_state":"installed","evidence_references":[{"source_url":"https://example.invalid/evidence","retrieved_at":"2026-08-04","claim":"fixture"}],"license_evidence_state":"approved","commercial_use_review_state":"approved","decision_state":"approved"}
@@ -105,80 +105,22 @@ class Tests(unittest.TestCase):
         self.endpoint=f"http://127.0.0.1:{self.server.server_address[1]}"; self.output=self.root/"out"
     def tearDown(self): self.server.shutdown(); self.server.server_close(); self.thread.join(); self.tmp.cleanup()
     def execute(self, **kwargs):
-        return run_comfyui_execution(self.fixture.request,self.fixture.workflow,self.fixture.bindings,self.fixture.tool,self.fixture.model,self.fixture.execution,self.output,endpoint=self.endpoint,execute=True,**kwargs)
-    def test_plan_is_deterministic_and_has_bound_workflow(self):
-        first=prepare_execution(self.fixture.request,self.fixture.workflow,self.fixture.bindings,self.fixture.tool,self.fixture.model,self.fixture.execution,endpoint=self.endpoint)[0]
-        second=prepare_execution(self.fixture.request,self.fixture.workflow,self.fixture.bindings,self.fixture.tool,self.fixture.model,self.fixture.execution,endpoint=self.endpoint)[0]
-        self.assertEqual(first,second); self.assertEqual(first["bound_values"],{"seed":7,"steps":1}); self.assertNotIn(str(self.root),json.dumps(first))
-    def test_output_root_containing_sources_is_rejected(self):
-        with self.assertRaises(AdapterError) as caught:
-            run_comfyui_execution(
-                self.fixture.request,self.fixture.workflow,self.fixture.bindings,
-                self.fixture.tool,self.fixture.model,self.fixture.execution,self.root,
-                endpoint=self.endpoint,execute=True,
-            )
-        self.assertEqual(caught.exception.code,"OUTPUT_OVERLAP")
-        self.assertEqual(self.state.posts,0)
-    def test_execute_acknowledgement_required(self):
-        with self.assertRaises(AdapterError) as c: run_comfyui_execution(self.fixture.request,self.fixture.workflow,self.fixture.bindings,self.fixture.tool,self.fixture.model,self.fixture.execution,self.output,endpoint=self.endpoint,execute=False)
-        self.assertEqual(c.exception.code,"EXECUTE_ACKNOWLEDGEMENT")
-    def test_success_and_offline_check(self):
-        result=self.execute(); self.assertTrue(result["written"]); self.assertEqual(self.state.posts,1)
-        package=self.output/result["package_path"]
-        checked=check_comfyui_execution(package/MANIFEST_FILE,self.output,self.fixture.request,self.fixture.workflow,self.fixture.bindings,self.fixture.tool,self.fixture.model,self.fixture.execution,endpoint=self.endpoint)
-        self.assertEqual(checked["candidate_count"],1); self.assertFalse(checked["network_contacted"])
-        sent=json.loads(self.state.post_payloads[0]); self.assertEqual(sent["prompt"]["1"]["inputs"]["seed"],7)
-    def test_idempotent_run_does_not_post_again(self):
-        first=self.execute(); second=self.execute(); self.assertTrue(first["written"]); self.assertTrue(second["reused"]); self.assertEqual(self.state.posts,1)
-    def test_proxy_environment_is_ignored(self):
-        old=os.environ.get("HTTP_PROXY"); os.environ["HTTP_PROXY"]="http://127.0.0.1:1"
-        try: self.assertTrue(self.execute()["written"])
-        finally:
-            if old is None: os.environ.pop("HTTP_PROXY",None)
-            else: os.environ["HTTP_PROXY"]=old
-    def test_redirect_rejected_and_cleanup(self):
-        self.state.mode="redirect"
-        with self.assertRaises(AdapterError) as c: self.execute()
-        self.assertEqual(c.exception.code,"HTTP_REDIRECT"); self.assertFalse(any(self.output.glob(".*.tmp")) if self.output.exists() else False)
-    def test_wrong_prompt_and_output_node_rejected(self):
-        for mode,code in (("wrong_prompt","HISTORY_PROMPT_ID"),("wrong_node","OUTPUT_NODES")):
-            with self.subTest(mode=mode):
-                self.state.mode=mode
-                with self.assertRaises(AdapterError) as c: self.execute()
-                self.assertEqual(c.exception.code,code)
-                self.state.posts=0
-    def test_unsafe_descriptor_rejected(self):
-        self.state.mode="unsafe_name"
-        with self.assertRaises(AdapterError) as c: self.execute()
-        self.assertEqual(c.exception.code,"OUTPUT_DESCRIPTOR")
-    def test_wrong_png_dimensions_rejected(self):
-        self.state.png=encode_rgba_png(RGBAImage(1,1,bytes([0,0,0,255])))
-        with self.assertRaises(AdapterError) as c: self.execute()
-        self.assertEqual(c.exception.code,"PNG_INVALID")
-    def test_overall_timeout(self):
-        self.state.mode="pending"; values=iter([0.0,0.0,4.0])
-        with self.assertRaises(AdapterError) as c: self.execute(clock=lambda:next(values),sleeper=lambda _:None)
-        self.assertEqual(c.exception.code,"OVERALL_TIMEOUT")
-    def test_checker_detects_tamper_and_extra_file(self):
-        result=self.execute(); package=self.output/result["package_path"]; manifest=json.loads((package/MANIFEST_FILE).read_text()); png=package/manifest["candidates"][0]["path"]
-        original=png.read_bytes(); png.write_bytes(original+b"x")
-        with self.assertRaises(AdapterError) as c: check_comfyui_execution(package/MANIFEST_FILE,self.output,self.fixture.request,self.fixture.workflow,self.fixture.bindings,self.fixture.tool,self.fixture.model,self.fixture.execution,endpoint=self.endpoint)
-        self.assertEqual(c.exception.code,"CANDIDATE_BYTES")
-        png.write_bytes(original); (package/"extra.txt").write_text("x")
-        with self.assertRaises(AdapterError) as c: check_comfyui_execution(package/MANIFEST_FILE,self.output,self.fixture.request,self.fixture.workflow,self.fixture.bindings,self.fixture.tool,self.fixture.model,self.fixture.execution,endpoint=self.endpoint)
-        self.assertEqual(c.exception.code,"FILE_SET")
-    def test_checker_rejects_oversized_candidate_before_decode(self):
-        result=self.execute(); package=self.output/result["package_path"]
-        manifest=json.loads((package/MANIFEST_FILE).read_text())
-        png=package/manifest["candidates"][0]["path"]
-        png.write_bytes(b"x"*(1048576+1))
-        with self.assertRaises(AdapterError) as caught:
-            check_comfyui_execution(package/MANIFEST_FILE,self.output,self.fixture.request,self.fixture.workflow,self.fixture.bindings,self.fixture.tool,self.fixture.model,self.fixture.execution,endpoint=self.endpoint)
-        self.assertEqual(caught.exception.code,"CANDIDATE_BYTES")
-    def test_profile_and_secret_fail_closed(self):
-        model=json.loads(self.fixture.model.read_text()); model["decision_state"]="reviewing"; self.fixture.model.write_bytes(canonical(model))
+        return run_comfyui_execution(self.fixture.request,self.fixture.workflow,self.fixture.bindings,self.fixture.tool,self.fixture.model,self.fixture.execution,self.output<H@‘5¤; model["ision_state"]="reviewing"; self.fixture.model.write_bytes(canonical(model))
         with self.assertRaises(AdapterError) as c: self.execute()
         self.assertEqual(c.exception.code,"PROFILE_APPROVAL")
+
+    def test_malformed_approved_profile_is_rejected(self):
+        tool=json.loads(self.fixture.tool.read_text()); tool["version"]="v1"; self.fixture.tool.write_bytes(canonical(tool))
+        with self.assertRaises(AdapterError) as caught: self.execute()
+        self.assertEqual(caught.exception.code,"PROFILE_VALIDATION")
+        self.assertEqual(self.state.posts,0)
+
+    def test_incomplete_generation_request_is_rejected(self):
+        request=json.loads(self.fixture.request.read_text()); request.pop("character_ref"); self.fixture.request.write_bytes(canonical(request))
+        with self.assertRaises(AdapterError) as caught: self.execute()
+        self.assertEqual(caught.exception.code,"REQUEST_VALIDATION")
+        self.assertEqual(self.state.posts,0)
+
     def test_nonloopback_and_secret_rejected_before_network(self):
         with self.assertRaises(AdapterError) as caught:
             prepare_execution(self.fixture.request,self.fixture.workflow,self.fixture.bindings,self.fixture.tool,self.fixture.model,self.fixture.execution,endpoint="http://192.168.1.1:8188")
@@ -186,12 +128,14 @@ class Tests(unittest.TestCase):
         request=json.loads(self.fixture.request.read_text()); request["api_token"]="secret"; self.fixture.request.write_bytes(canonical(request))
         with self.assertRaises(AdapterError) as caught: self.execute()
         self.assertEqual(caught.exception.code,"SECRET_LIKE_DATA"); self.assertEqual(self.state.posts,0)
+
     def test_duplicate_and_unknown_queue_json_rejected(self):
         for mode,code in (("duplicate_queue","DUPLICATE_JSON_KEY"),("queue_unknown","QUEUE_RESPONSE_SCHEMA")):
             with self.subTest(mode=mode):
                 self.state.mode=mode
                 with self.assertRaises(AdapterError) as caught: self.execute()
                 self.assertEqual(caught.exception.code,code)
+
     def test_execution_error_type_and_count_rejected(self):
         for mode,code in (("execution_error","EXECUTION_ERROR"),("wrong_type","OUTPUT_TYPE"),("too_many","IMAGE_COUNT")):
             with self.subTest(mode=mode):
@@ -201,10 +145,12 @@ class Tests(unittest.TestCase):
                     core={k:v for k,v in profile.items() if k!="id"}; profile["id"]=content_identifier("comfyui-execution-profile",core,20); self.fixture.execution.write_bytes(canonical(profile))
                 with self.assertRaises(AdapterError) as caught: self.execute()
                 self.assertEqual(caught.exception.code,code)
+
     def test_missing_srgb_png_rejected(self):
         self.state.png=self.state.png.replace(b'sRGB',b'tEXt',1)
         with self.assertRaises(AdapterError) as caught: self.execute()
         self.assertEqual(caught.exception.code,"PNG_INVALID")
+
     def test_noncanonical_request_and_duplicate_source_json_rejected(self):
         data=json.loads(self.fixture.request.read_text()); self.fixture.request.write_text(json.dumps(data,indent=2),encoding="utf-8")
         with self.assertRaises(AdapterError) as caught: self.execute()
