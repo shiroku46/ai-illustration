@@ -1,0 +1,102 @@
+{
+  "id": "paper-theater-frame-preview-package-11111111111111111111",
+  "kind": "paper-theater-frame-preview-package",
+  "schema_version": "1.0",
+  "source_frame_render": {
+    "id": "paper-theater-frame-render-package-22222222222222222222",
+    "path": "paper-theater-frame-render-package-22222222222222222222/frame-render-manifest.json",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "source_audio_preview": {
+    "id": "paper-theater-audio-preview-33333333333333333333",
+    "path": "paper-theater-audio-preview-33333333333333333333/audio-preview-manifest.json",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "intent": "evaluation",
+  "audio_license_status": "reviewing",
+  "canvas": {
+    "width": 1280,
+    "height": 720,
+    "background_rgba": [
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "scene_duration_ms": 1000,
+  "fps_num": 24,
+  "fps_den": 1,
+  "frame_count": 24,
+  "audio_placement": {
+    "policy": "signed-rational-sample-offset-no-resampling",
+    "offset_ms": 0,
+    "start_sample_num": 0,
+    "start_sample_den": 1000,
+    "source_sample_rate": 48000,
+    "source_frame_count": 48000,
+    "duration_policy": "exact",
+    "synchronized_audio_end_ms": 1000
+  },
+  "frame_inventory": {
+    "id": "paper-theater-frame-inventory-44444444444444444444",
+    "path": "frame-inventory.json",
+    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "audio": {
+    "path": "audio/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.wav",
+    "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "size": 96044,
+    "duration_ms": 1000,
+    "channels": 1,
+    "sample_rate": 48000,
+    "bits_per_sample": 16
+  },
+  "playback_policy": {
+    "clock": "audio-current-time-with-wall-clock-before-and-after-audio",
+    "frame_selection": "rational-boundary-search-state-at-frame-start",
+    "final_partial_frame": "preserved-from-source-inventory",
+    "transition": "css-only-on-frame-checksum-change",
+    "autoplay": false,
+    "network": false
+  },
+  "media_copied_unchanged": true,
+  "video_created": false,
+  "files": [
+    {
+      "path": "audio/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.wav",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "size": 96044
+    },
+    {
+      "path": "frame-inventory.json",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "size": 1
+    },
+    {
+      "path": "frames/00000000.png",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "size": 1
+    },
+    {
+      "path": "index.html",
+      "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "size": 1
+    },
+    {
+      "path": "player.js",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "size": 1
+    },
+    {
+      "path": "preview-data.js",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "size": 1
+    },
+    {
+      "path": "style.css",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "size": 1
+    }
+  ]
+}
