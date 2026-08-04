@@ -356,6 +356,17 @@ class FramePreviewTests(unittest.TestCase):
         with self.assertRaises(FramePreviewError) as parent:
             self.build(write=True, output_root=self.base)
         self.assertEqual(parent.exception.code, "OUTPUT_OVERLAPS_SOURCE")
+        for source_root in (
+            self.renderer_root,
+            self.plan_root,
+            self.audio_preview_root,
+            self.preview_root,
+            self.package_root,
+            self.audio_root,
+        ):
+            with self.subTest(source_root=source_root), self.assertRaises(FramePreviewError) as caught:
+                self.build(write=True, output_root=source_root / "nested-frame-preview")
+            self.assertEqual(caught.exception.code, "OUTPUT_OVERLAPS_SOURCE")
 
     def test_static_player_is_local_only_and_preserves_rational_timing(self) -> None:
         result = self.build(write=True)
