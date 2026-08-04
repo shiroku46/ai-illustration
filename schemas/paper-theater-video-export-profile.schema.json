@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/paper-theater-video-export-profile.schema.json",
+  "title": "Paper Theater Video Export Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "kind",
+    "schema_version",
+    "family",
+    "container",
+    "extension",
+    "alpha_policy",
+    "frame_policy",
+    "metadata_policy",
+    "video",
+    "audio"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^paper-theater-video-export-profile-[0-9a-f]{20}$"
+    },
+    "kind": {
+      "const": "paper-theater-video-export-profile"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "family": {
+      "const": "mp4-h264-aac-v1"
+    },
+    "container": {
+      "const": "mp4"
+    },
+    "extension": {
+      "const": "mp4"
+    },
+    "alpha_policy": {
+      "const": "require-opaque-source"
+    },
+    "frame_policy": {
+      "const": "exact-numbered-sequence-no-resize"
+    },
+    "metadata_policy": {
+      "const": "strip-input-and-fix-creation-time"
+    },
+    "video": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "codec",
+        "pixel_format",
+        "preset",
+        "crf"
+      ],
+      "properties": {
+        "codec": {
+          "const": "libx264"
+        },
+        "pixel_format": {
+          "const": "yuv420p"
+        },
+        "preset": {
+          "enum": [
+            "ultrafast",
+            "superfast",
+            "veryfast",
+            "faster",
+            "fast",
+            "medium",
+            "slow",
+            "slower",
+            "veryslow"
+          ]
+        },
+        "crf": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 51
+        }
+      }
+    },
+    "audio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "codec",
+        "bitrate_kbps"
+      ],
+      "properties": {
+        "codec": {
+          "const": "aac"
+        },
+        "bitrate_kbps": {
+          "type": "integer",
+          "minimum": 32,
+          "maximum": 512
+        }
+      }
+    }
+  }
+}
