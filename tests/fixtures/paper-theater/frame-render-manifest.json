@@ -1,0 +1,53 @@
+{
+  "audio_license_status": "reviewing",
+  "audio_placement": {
+    "offset_ms": 0
+  },
+  "canvas": {
+    "background_rgba": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "height": 1,
+    "width": 1
+  },
+  "files": [
+    {
+      "path": "frame-inventory.json",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size": 1
+    },
+    {
+      "path": "frames/00000000.png",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "size": 1
+    }
+  ],
+  "fps_den": 1,
+  "fps_num": 1,
+  "frame_count": 1,
+  "frame_inventory": {
+    "id": "paper-theater-frame-inventory-11111111111111111111",
+    "path": "frame-inventory.json",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "id": "paper-theater-frame-render-package-11111111111111111111",
+  "intent": "evaluation",
+  "kind": "paper-theater-frame-render-package",
+  "media_created": true,
+  "render_policy": {
+    "compositing": "straight-alpha-source-over-integer-round-half-up",
+    "coordinate_rule": "inverse-pixel-center-floor",
+    "png_encoding": "rgba8-noninterlaced-srgb-filter0-zlib9",
+    "scale_arithmetic": "reduced-rational-integer-only"
+  },
+  "schema_version": "1.0",
+  "source_renderer_job": {
+    "id": "paper-theater-renderer-job-22222222222222222222",
+    "path": "paper-theater-renderer-job-22222222222222222222/renderer-job-manifest.json",
+    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "span_count": 1
+}
