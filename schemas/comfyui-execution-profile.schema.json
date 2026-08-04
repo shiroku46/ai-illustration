@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/comfyui-execution-profile.schema.json",
+  "title": "ComfyUI Execution Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "kind",
+    "schema_version",
+    "workflow_sha256",
+    "tool_profile_ref",
+    "model_profile_ref",
+    "output_node_ids",
+    "expected_width",
+    "expected_height",
+    "limits"
+  ],
+  "properties": {
+    "id": {"type": "string", "pattern": "^comfyui-execution-profile-[0-9a-f]{20}$"},
+    "kind": {"const": "comfyui-execution-profile"},
+    "schema_version": {"const": "1.0"},
+    "workflow_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "tool_profile_ref": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "model_profile_ref": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "output_node_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"}
+    },
+    "expected_width": {"type": "integer", "minimum": 1, "maximum": 8192},
+    "expected_height": {"type": "integer", "minimum": 1, "maximum": 8192},
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_images",
+        "max_queue_response_bytes",
+        "max_history_response_bytes",
+        "max_png_bytes",
+        "max_total_png_bytes",
+        "request_timeout_seconds",
+        "poll_interval_ms",
+        "overall_timeout_seconds"
+      ],
+      "properties": {
+        "max_images": {"type": "integer", "minimum": 1, "maximum": 32},
+        "max_queue_response_bytes": {"type": "integer", "minimum": 128, "maximum": 1048576},
+        "max_history_response_bytes": {"type": "integer", "minimum": 128, "maximum": 16777216},
+        "max_png_bytes": {"type": "integer", "minimum": 64, "maximum": 134217728},
+        "max_total_png_bytes": {"type": "integer", "minimum": 64, "maximum": 536870912},
+        "request_timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300},
+        "poll_interval_ms": {"type": "integer", "minimum": 50, "maximum": 10000},
+        "overall_timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 86400}
+      }
+    }
+  }
+}

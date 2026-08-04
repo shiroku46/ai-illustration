@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/comfyui-execution-package.schema.json",
+  "title": "ComfyUI Execution Package",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "kind",
+    "schema_version",
+    "execution_plan",
+    "request_ref",
+    "endpoint",
+    "prompt_id",
+    "workflow",
+    "tool_profile_ref",
+    "model_profile_ref",
+    "execution_profile_ref",
+    "candidate_count",
+    "candidates",
+    "review_state",
+    "production_approved",
+    "commercial_use_approved",
+    "network_effect",
+    "files"
+  ],
+  "properties": {
+    "id": {"type": "string", "pattern": "^comfyui-execution-package-[0-9a-f]{20}$"},
+    "kind": {"const": "comfyui-execution-package"},
+    "schema_version": {"const": "1.0"},
+    "execution_plan": {"$ref": "#/$defs/binding"},
+    "request_ref": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+    "endpoint": {"type": "string", "pattern": "^http://(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::[0-9]{1,5})?$"},
+    "prompt_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$", "maxLength": 128},
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "canonical_sha256", "bound_sha256"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "canonical_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "bound_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "tool_profile_ref": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "model_profile_ref": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "execution_profile_ref": {"type": "string", "pattern": "^comfyui-execution-profile-[0-9a-f]{20}$"},
+    "candidate_count": {"type": "integer", "minimum": 1, "maximum": 32},
+    "candidates": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {"$ref": "#/$defs/candidate"}
+    },
+    "review_state": {"const": "unreviewed"},
+    "production_approved": {"const": false},
+    "commercial_use_approved": {"const": false},
+    "network_effect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["queued", "loopback_only"],
+      "properties": {"queued": {"const": true}, "loopback_only": {"const": true}}
+    },
+    "files": {"type": "array", "minItems": 3, "items": {"$ref": "#/$defs/file"}}
+  },
+  "$defs": {
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "sha256"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "path": {"const": "execution-plan.json"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "sidecar_path", "sha256", "size", "width", "height", "output_node_id", "server_filename", "server_subfolder", "index"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^candidate-[0-9a-f]{20}$"},
+        "path": {"type": "string", "pattern": "^candidates/candidate-[0-9a-f]{20}\\.png$"},
+        "sidecar_path": {"type": "string", "pattern": "^candidates/candidate-[0-9a-f]{20}\\.json$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size": {"type": "integer", "minimum": 1},
+        "width": {"type": "integer", "minimum": 1, "maximum": 8192},
+        "height": {"type": "integer", "minimum": 1, "maximum": 8192},
+        "output_node_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+        "server_filename": {"type": "string", "minLength": 1, "maxLength": 255},
+        "server_subfolder": {"type": "string", "maxLength": 1024},
+        "index": {"type": "integer", "minimum": 0, "maximum": 31}
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "size"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}
