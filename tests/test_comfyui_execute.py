@@ -110,6 +110,15 @@ class Tests(unittest.TestCase):
         first=prepare_execution(self.fixture.request,self.fixture.workflow,self.fixture.bindings,self.fixture.tool,self.fixture.model,self.fixture.execution,endpoint=self.endpoint)[0]
         second=prepare_execution(self.fixture.request,self.fixture.workflow,self.fixture.bindings,self.fixture.tool,self.fixture.model,self.fixture.execution,endpoint=self.endpoint)[0]
         self.assertEqual(first,second); self.assertEqual(first["bound_values"],{"seed":7,"steps":1}); self.assertNotIn(str(self.root),json.dumps(first))
+    def test_output_root_containing_sources_is_rejected(self):
+        with self.assertRaises(AdapterError) as caught:
+            run_comfyui_execution(
+                self.fixture.request,self.fixture.workflow,self.fixture.bindings,
+                self.fixture.tool,self.fixture.model,self.fixture.execution,self.root,
+                endpoint=self.endpoint,execute=True,
+            )
+        self.assertEqual(caught.exception.code,"OUTPUT_OVERLAP")
+        self.assertEqual(self.state.posts,0)
     def test_execute_acknowledgement_required(self):
         with self.assertRaises(AdapterError) as c: run_comfyui_execution(self.fixture.request,self.fixture.workflow,self.fixture.bindings,self.fixture.tool,self.fixture.model,self.fixture.execution,self.output,endpoint=self.endpoint,execute=False)
         self.assertEqual(c.exception.code,"EXECUTE_ACKNOWLEDGEMENT")
@@ -162,7 +171,6 @@ class Tests(unittest.TestCase):
         model=json.loads(self.fixture.model.read_text()); model["decision_state"]="reviewing"; self.fixture.model.write_bytes(canonical(model))
         with self.assertRaises(AdapterError) as c: self.execute()
         self.assertEqual(c.exception.code,"PROFILE_APPROVAL")
-
     def test_nonloopback_and_secret_rejected_before_network(self):
         with self.assertRaises(AdapterError) as caught:
             prepare_execution(self.fixture.request,self.fixture.workflow,self.fixture.bindings,self.fixture.tool,self.fixture.model,self.fixture.execution,endpoint="http://192.168.1.1:8188")
@@ -170,14 +178,12 @@ class Tests(unittest.TestCase):
         request=json.loads(self.fixture.request.read_text()); request["api_token"]="secret"; self.fixture.request.write_bytes(canonical(request))
         with self.assertRaises(AdapterError) as caught: self.execute()
         self.assertEqual(caught.exception.code,"SECRET_LIKE_DATA"); self.assertEqual(self.state.posts,0)
-
     def test_duplicate_and_unknown_queue_json_rejected(self):
         for mode,code in (("duplicate_queue","DUPLICATE_JSON_KEY"),("queue_unknown","QUEUE_RESPONSE_SCHEMA")):
             with self.subTest(mode=mode):
                 self.state.mode=mode
                 with self.assertRaises(AdapterError) as caught: self.execute()
                 self.assertEqual(caught.exception.code,code)
-
     def test_execution_error_type_and_count_rejected(self):
         for mode,code in (("execution_error","EXECUTION_ERROR"),("wrong_type","OUTPUT_TYPE"),("too_many","IMAGE_COUNT")):
             with self.subTest(mode=mode):
@@ -187,12 +193,10 @@ class Tests(unittest.TestCase):
                     core={k:v for k,v in profile.items() if k!="id"}; profile["id"]=content_identifier("comfyui-execution-profile",core,20); self.fixture.execution.write_bytes(canonical(profile))
                 with self.assertRaises(AdapterError) as caught: self.execute()
                 self.assertEqual(caught.exception.code,code)
-
     def test_missing_srgb_png_rejected(self):
         self.state.png=self.state.png.replace(b'sRGB',b'tEXt',1)
         with self.assertRaises(AdapterError) as caught: self.execute()
         self.assertEqual(caught.exception.code,"PNG_INVALID")
-
     def test_noncanonical_request_and_duplicate_source_json_rejected(self):
         data=json.loads(self.fixture.request.read_text()); self.fixture.request.write_text(json.dumps(data,indent=2),encoding="utf-8")
         with self.assertRaises(AdapterError) as caught: self.execute()
