@@ -4,6 +4,7 @@ from contextlib import redirect_stderr
 import io
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -77,8 +78,13 @@ class ReleaseAuditTests(unittest.TestCase):
     def _write_repository(self) -> None:
         for relative in MINIMUM_CRITICAL_PATHS:
             path = self.root / relative
+            if path.is_symlink():
+                path.unlink()
+            elif path.exists() and path.is_dir():
+                shutil.rmtree(path)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(f"fixture: {relative}\n", encoding="utf-8")
+
         workspace_schema = {
             "$defs": {
                 "check": {
@@ -108,6 +114,12 @@ class ReleaseAuditTests(unittest.TestCase):
         )
         self.contract.write_bytes(canonical(contract_document()))
 
+    def _diagnostic_codes(self) -> set[str]:
+        return {
+            item["code"]
+            for item in audit_release(self.contract)["diagnostics"]
+        }
+
     def test_complete_audit_is_deterministic_and_non_mutating(self) -> None:
         before = sorted(
             path.relative_to(self.root).as_posix()
@@ -132,41 +144,59 @@ class ReleaseAuditTests(unittest.TestCase):
         self.assertFalse(first["external_process_started"])
         self.assertFalse(first["filesystem_mutated"])
 
-    def test_version_scripts_dependencies_and_registry_mismatches(self) -> None:
+    def test_version_scripts_dependencies_package_and_registry_mismatches(self) -> None:
         pyproject = self.root / "pyproject.toml"
-        text = pyproject.read_text(encoding="utf-8")
-        pyproject.write_text(text.replace('version = "1.0.0"', 'version = "0.9.0"'), encoding="utf-8")
-        result = audit_release(self.contract)
-        self.assertIn("PYPROJECT_VERSION", {item["code"] for item in result["diagnostics"]})
+        pyproject.write_text(
+            pyproject.read_text(encoding="utf-8").replace(
+                'version = "1.0.0"', 'version = "0.9.0"'
+            ),
+            encoding="utf-8",
+        )
+        self.assertIn("PYPROJECT_VERSION", self._diagnostic_codes())
 
         self._write_repository()
         pyproject.write_text(
-            pyproject.read_text(encoding="utf-8").replace("dependencies = []", 'dependencies = ["requests"]'),
+            pyproject.read_text(encoding="utf-8").replace(
+                "dependencies = []", 'dependencies = ["requests"]'
+            ),
             encoding="utf-8",
         )
-        result = audit_release(self.contract)
-        self.assertIn("RUNTIME_DEPENDENCIES", {item["code"] for item in result["diagnostics"]})
+        self.assertIn("RUNTIME_DEPENDENCIES", self._diagnostic_codes())
 
         self._write_repository()
         pyproject.write_text(
-            pyproject.read_text(encoding="utf-8").replace("ai-illustration-workspace", "ai-illustration-workspace-broken", 1),
+            pyproject.read_text(encoding="utf-8").replace(
+                "ai-illustration-workspace",
+                "ai-illustration-workspace-broken",
+                1,
+            ),
             encoding="utf-8",
         )
-        result = audit_release(self.contract)
-        self.assertIn("ENTRY_POINTS", {item["code"] for item in result["diagnostics"]})
+        self.assertIn("ENTRY_POINTS", self._diagnostic_codes())
 
-        with patch.object(release_audit, "CHECKERS", {key: value for key, value in release_audit.CHECKERS.items() if key != "video-export"}):
-            result = audit_release(self.contract)
-        self.assertIn("WORKSPACE_REGISTRY", {item["code"] for item in result["diagnostics"]})
+        self._write_repository()
+        with patch.object(release_audit, "__version__", "0.9.0"):
+            self.assertIn("PACKAGE_VERSION", self._diagnostic_codes())
+
+        with patch.object(
+            release_audit,
+            "CHECKERS",
+            {
+                key: value
+                for key, value in release_audit.CHECKERS.items()
+                if key != "video-export"
+            },
+        ):
+            self.assertIn("WORKSPACE_REGISTRY", self._diagnostic_codes())
 
     def test_missing_symlink_oversized_and_protected_tamper_fail(self) -> None:
-        critical = self.root / sorted(MINIMUM_CRITICAL_PATHS)[0]
+        critical_relative = sorted(MINIMUM_CRITICAL_PATHS)[0]
+        critical = self.root / critical_relative
         critical.unlink()
-        result = audit_release(self.contract)
-        self.assertIn("CRITICAL_FILE_TYPE", {item["code"] for item in result["diagnostics"]})
+        self.assertIn("CRITICAL_FILE_TYPE", self._diagnostic_codes())
 
         self._write_repository()
-        critical = self.root / sorted(MINIMUM_CRITICAL_PATHS)[0]
+        critical = self.root / critical_relative
         outside = self.root / "outside.txt"
         outside.write_text("outside", encoding="utf-8")
         critical.unlink()
@@ -175,21 +205,30 @@ class ReleaseAuditTests(unittest.TestCase):
         except (OSError, NotImplementedError):
             pass
         else:
-            result = audit_release(self.contract)
-            self.assertIn("PATH_SYMLINK", {item["code"] for item in result["diagnostics"]})
+            with self.assertRaises(ReleaseAuditError) as caught:
+                audit_release(self.contract)
+            self.assertEqual(caught.exception.code, "PATH_SYMLINK")
 
         self._write_repository()
-        critical = self.root / sorted(MINIMUM_CRITICAL_PATHS)[0]
+        critical = self.root / critical_relative
         critical.write_bytes(b"x" * 17)
         with patch.object(release_audit, "MAX_CRITICAL_FILE_BYTES", 16):
-            result = audit_release(self.contract)
-        self.assertIn("CRITICAL_FILE_SIZE", {item["code"] for item in result["diagnostics"]})
+            self.assertIn("CRITICAL_FILE_SIZE", self._diagnostic_codes())
 
         self._write_repository()
         protected = self.root / sorted(MINIMUM_PROTECTED_SOURCES)[0]
-        protected.write_text("def bad():\n    return shell=True\n", encoding="utf-8")
-        result = audit_release(self.contract)
-        self.assertIn("FORBIDDEN_SOURCE_PATTERN", {item["code"] for item in result["diagnostics"]})
+        protected.write_text(
+            "def bad():\n    return shell=True\n",
+            encoding="utf-8",
+        )
+        self.assertIn("FORBIDDEN_SOURCE_PATTERN", self._diagnostic_codes())
+
+        self._write_repository()
+        protected.write_text(
+            'SERVICE = "https://example.com/remote"\n',
+            encoding="utf-8",
+        )
+        self.assertIn("EXTERNAL_URL_LITERAL", self._diagnostic_codes())
 
     def test_contract_format_and_binding_failures(self) -> None:
         cases: list[tuple[str, bytes, str]] = []
@@ -198,9 +237,13 @@ class ReleaseAuditTests(unittest.TestCase):
         cases.append(("wrong-id", canonical(wrong_id), "RELEASE_ID"))
 
         unsafe = contract_document()
-        unsafe["critical_paths"] = sorted([*unsafe["critical_paths"], "../escape"])
+        unsafe["critical_paths"] = sorted(
+            [*unsafe["critical_paths"], "../escape"]
+        )
         unsafe_core = {key: unsafe[key] for key in unsafe if key != "id"}
-        unsafe["id"] = content_identifier("ai-illustration-mvp-release", unsafe_core, 20)
+        unsafe["id"] = content_identifier(
+            "ai-illustration-mvp-release", unsafe_core, 20
+        )
         cases.append(("unsafe", canonical(unsafe), "UNSAFE_PATH"))
 
         secret = contract_document()
@@ -208,8 +251,16 @@ class ReleaseAuditTests(unittest.TestCase):
         cases.append(("secret", canonical(secret), "SECRET_LIKE_DATA"))
 
         noncanonical = contract_document()
-        cases.append(("noncanonical", json.dumps(noncanonical, indent=2).encode("utf-8"), "NONCANONICAL_JSON"))
-        cases.append(("duplicate", b'{"id":"a","id":"b"}\n', "DUPLICATE_JSON_KEY"))
+        cases.append(
+            (
+                "noncanonical",
+                json.dumps(noncanonical, indent=2).encode("utf-8"),
+                "NONCANONICAL_JSON",
+            )
+        )
+        cases.append(
+            ("duplicate", b'{"id":"a","id":"b"}\n', "DUPLICATE_JSON_KEY")
+        )
 
         for name, payload, code in cases:
             with self.subTest(name=name):
