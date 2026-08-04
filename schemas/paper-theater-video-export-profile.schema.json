@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/paper-theater-video-export-profile.schema.json",
+  "title": "Paper Theater Video Export Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "kind",
+    "schema_version",
+    "family",
+    "container",
+    "video_codec",
+    "audio_codec",
+    "pixel_format",
+    "alpha_policy",
+    "preset",
+    "crf",
+    "audio_bitrate_kbps",
+    "movflags",
+    "ffmpeg_sha256",
+    "max_output_bytes"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^paper-theater-video-export-profile-[0-9a-f]{20}$"
+    },
+    "kind": {
+      "const": "paper-theater-video-export-profile"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "family": {
+      "const": "mp4-h264-aac-v1"
+    },
+    "container": {
+      "const": "mp4"
+    },
+    "video_codec": {
+      "const": "libx264"
+    },
+    "audio_codec": {
+      "const": "aac"
+    },
+    "pixel_format": {
+      "const": "yuv420p"
+    },
+    "alpha_policy": {
+      "const": "require-opaque-source"
+    },
+    "preset": {
+      "enum": [
+        "ultrafast",
+        "superfast",
+        "veryfast",
+        "faster",
+        "fast",
+        "medium",
+        "slow",
+        "slower",
+        "veryslow"
+      ]
+    },
+    "crf": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 51
+    },
+    "audio_bitrate_kbps": {
+      "type": "integer",
+      "minimum": 32,
+      "maximum": 512
+    },
+    "movflags": {
+      "const": "+faststart"
+    },
+    "ffmpeg_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "max_output_bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 8589934592
+    }
+  }
+}
