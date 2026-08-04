@@ -221,9 +221,17 @@ def check_execution_package(manifest_path: Path, expected_plan: dict[str, Any]) 
             reject_symlinks(path, str(path))
             if not path.is_file() or path.is_symlink():
                 raise AdapterError("FILE_MISSING", "candidate file is missing", str(path))
-        png = png_path.read_bytes()
+        declared_size = item["size"]
+        try:
+            observed_size = png_path.stat().st_size
+        except OSError as exc:
+            raise AdapterError("CANDIDATE_BYTES", str(exc), png_rel) from exc
+        if observed_size != declared_size or observed_size > plan["limits"]["max_png_bytes"]:
+            raise AdapterError("CANDIDATE_BYTES", "candidate PNG checksum or size changed", png_rel)
+        with png_path.open("rb") as handle:
+            png = handle.read(plan["limits"]["max_png_bytes"] + 1)
         sidecar, side_bytes, _ = source_file(side_path, f"candidate_sidecar[{index}]", canonical_required=True)
-        if sha256(png) != item["sha256"] or len(png) != item["size"]:
+        if sha256(png) != item["sha256"] or len(png) != declared_size:
             raise AdapterError("CANDIDATE_BYTES", "candidate PNG checksum or size changed", png_rel)
         try:
             decode_rgba_png(png, expected_width=plan["expected_width"], expected_height=plan["expected_height"])
