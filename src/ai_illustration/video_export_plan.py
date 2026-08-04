@@ -27,8 +27,8 @@ def _build_plan(
     package_root: Path,
     audio_root: Path,
     profile_root: Path,
-) -> tuple[dict[str, Any], bytes, Path, Path, set[Path]]:
-    source, source_relative, source_path, source_bytes, source_package, _paths = _source_reference(
+) -> tuple[dict[str, Any], bytes, Path, Path, dict[str, Path], set[Path]]:
+    source, source_relative, source_path, source_bytes, source_package, source_paths = _source_reference(
         frame_preview_manifest,
         frame_preview_root,
         frame_render_root,
@@ -72,7 +72,7 @@ def _build_plan(
         "scene_duration_ms": duration,
         "audio_placement": placement,
         "input": {
-            "working_directory": "source-frame-preview-package",
+            "working_directory": "isolated-byte-identical-source-copy",
             "frame_pattern": "frames/%08d.png",
             "audio_path": audio["path"],
         },
@@ -86,7 +86,8 @@ def _build_plan(
         "safety": {
             "shell": False,
             "stdin": False,
-            "network": False,
+            "network_inputs": False,
+            "source_copy_isolated": True,
             "max_output_bytes": MAX_VIDEO_BYTES,
             "max_diagnostic_bytes": MAX_DIAGNOSTIC_BYTES,
             "max_timeout_seconds": MAX_TIMEOUT_SECONDS,
@@ -110,7 +111,7 @@ def _build_plan(
         profile_resolved,
         executable_path,
     }
-    return plan, plan_bytes, source_package, executable_path, sources
+    return plan, plan_bytes, source_package, executable_path, source_paths, sources
 
 
 def _output_candidate(output_root: Path) -> Path:
@@ -144,7 +145,7 @@ def build_video_export_plan(
     profile_root: Path,
     output_root: Path,
 ) -> dict[str, Any]:
-    plan, _plan_bytes, _source_package, _executable_path, sources = _build_plan(
+    plan, _plan_bytes, _source_package, _executable_path, _source_paths, sources = _build_plan(
         frame_preview_manifest,
         profile_path,
         ffmpeg_path,
