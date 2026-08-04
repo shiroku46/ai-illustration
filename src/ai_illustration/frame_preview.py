@@ -291,6 +291,13 @@ def _validated_sources(
         audio_package,
         renderer_path.parent.resolve(),
         plan_path.parent.resolve(),
+        frame_root,
+        renderer_root,
+        plan_root,
+        audio_preview_base,
+        preview_base,
+        package_base,
+        audio_base,
     }
     return (
         frame_manifest,
