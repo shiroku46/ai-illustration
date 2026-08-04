@@ -295,7 +295,7 @@ class VideoExportTests(unittest.TestCase):
         def execute(arguments, **kwargs):
             calls.append((list(arguments), dict(kwargs)))
             Path(arguments[-1]).write_bytes(video)
-            kwargs["stdout"].write(b"fake ffmpeg ok")
+            os.write(kwargs["stdout"], b"fake ffmpeg ok")
             return subprocess.CompletedProcess(arguments, 0)
 
         return calls, execute
@@ -338,10 +338,78 @@ class VideoExportTests(unittest.TestCase):
         self.assertIsInstance(arguments, list)
         self.assertFalse(kwargs["shell"])
         self.assertIs(kwargs["stdin"], subprocess.DEVNULL)
+        self.assertIsInstance(kwargs["stdout"], int)
+        self.assertTrue(kwargs["close_fds"])
+        self.assertTrue(kwargs["start_new_session"])
         self.assertEqual(kwargs["env"]["PATH"], "")
         self.assertNotIn("SECRET", " ".join(kwargs["env"]))
         self.assertEqual(arguments[0], str(self.ffmpeg.resolve()))
         self.assertEqual(arguments[-1], str((self.output_root / f".{first['plan']['id']}.tmp" / "video.mp4").resolve()))
+
+    def test_existing_staging_conflict_is_preserved(self) -> None:
+        plan = self.plan()["video_export_plan"]
+        staging = self.output_root / f".{plan['id']}.tmp"
+        staging.mkdir(parents=True)
+        marker = staging / "keep.txt"
+        marker.write_text("owned elsewhere", encoding="utf-8")
+        with self.validated(), patch(
+            "ai_illustration.video_export_runtime.subprocess.run"
+        ) as mocked, self.assertRaisesRegex(VideoExportError, "STAGING_CONFLICT"):
+            run_video_export(
+                self.preview_manifest,
+                self.profile_path,
+                self.ffmpeg,
+                self.output_root,
+                timeout_seconds=5,
+                **self.roots(),
+            )
+        self.assertTrue(marker.is_file())
+        self.assertEqual(marker.read_text(encoding="utf-8"), "owned elsewhere")
+        mocked.assert_not_called()
+
+    def test_bounded_diagnostic_capture(self) -> None:
+        def noisy_failure(arguments, **kwargs):
+            os.write(kwargs["stdout"], b"x" * 256)
+            return subprocess.CompletedProcess(arguments, 2)
+
+        with self.validated(), patch(
+            "ai_illustration.video_export_runtime.MAX_DIAGNOSTIC_BYTES", 16
+        ), patch(
+            "ai_illustration.video_export_runtime.subprocess.run", side_effect=noisy_failure
+        ), self.assertRaises(VideoExportError) as caught:
+            run_video_export(
+                self.preview_manifest,
+                self.profile_path,
+                self.ffmpeg,
+                self.output_root,
+                timeout_seconds=5,
+                **self.roots(),
+            )
+        self.assertEqual(caught.exception.code, "FFMPEG_FAILED")
+        self.assertIn("[diagnostic truncated]", caught.exception.message)
+        self.assertLess(len(caught.exception.message), 256)
+        self.assertEqual(list(self.output_root.iterdir()), [])
+
+    def test_ffmpeg_change_during_execution_fails_and_cleans(self) -> None:
+        def mutate_executable(arguments, **kwargs):
+            Path(arguments[-1]).write_bytes(b"encoded-video")
+            self.ffmpeg.write_bytes(b"changed-during-execution")
+            self.ffmpeg.chmod(self.ffmpeg.stat().st_mode | stat.S_IXUSR)
+            os.write(kwargs["stdout"], b"completed")
+            return subprocess.CompletedProcess(arguments, 0)
+
+        with self.validated(), patch(
+            "ai_illustration.video_export_runtime.subprocess.run", side_effect=mutate_executable
+        ), self.assertRaisesRegex(VideoExportError, "FFMPEG_CHECKSUM"):
+            run_video_export(
+                self.preview_manifest,
+                self.profile_path,
+                self.ffmpeg,
+                self.output_root,
+                timeout_seconds=5,
+                **self.roots(),
+            )
+        self.assertEqual(list(self.output_root.iterdir()), [])
 
     def test_timeout_failure_and_oversize_leave_no_package(self) -> None:
         with self.validated(), patch(
@@ -359,7 +427,7 @@ class VideoExportTests(unittest.TestCase):
         self.assertEqual(list(self.output_root.iterdir()), [])
 
         def failed(arguments, **kwargs):
-            kwargs["stdout"].write(b"failure")
+            os.write(kwargs["stdout"], b"failure")
             return subprocess.CompletedProcess(arguments, 2)
 
         with self.validated(), patch(

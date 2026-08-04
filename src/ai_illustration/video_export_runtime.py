@@ -6,9 +6,11 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import threading
 from typing import Any
 
-from .naming import SHA256_RE, content_identifier, safe_relative_path
+from .frame_preview import FRAME_PREVIEW_MANIFEST
+from .naming import SHA256_RE, content_identifier
 from .video_export_core import (
     PACKAGE_KIND,
     VIDEO_EXPORT_MANIFEST,
@@ -16,13 +18,16 @@ from .video_export_core import (
     VIDEO_OUTPUT,
     VideoExportContext,
     VideoExportError,
+    _load_object,
     bounded_int,
     build_plan_context,
     json_bytes,
     reject_output_overlap,
     relative_file,
     root,
+    safe_file,
     sha256,
+    validate_ffmpeg,
 )
 
 MAX_TIMEOUT_SECONDS = 3600
@@ -87,15 +92,69 @@ def _sanitized_environment(staging: Path) -> dict[str, str]:
     return environment
 
 
-def _bounded_diagnostic(path: Path) -> str:
+def _run_with_bounded_diagnostics(
+    arguments: list[str], staging: Path, timeout: int
+) -> tuple[subprocess.CompletedProcess[Any], str]:
+    read_fd, write_fd = os.pipe()
+    captured = bytearray()
+    truncated = False
+    read_errors: list[OSError] = []
+
+    def drain() -> None:
+        nonlocal truncated
+        try:
+            with os.fdopen(read_fd, "rb", closefd=True) as stream:
+                while True:
+                    chunk = stream.read(65536)
+                    if not chunk:
+                        break
+                    room = MAX_DIAGNOSTIC_BYTES - len(captured)
+                    if room > 0:
+                        captured.extend(chunk[:room])
+                    if len(chunk) > max(room, 0):
+                        truncated = True
+        except OSError as exc:
+            read_errors.append(exc)
+
+    reader = threading.Thread(target=drain, name="ffmpeg-diagnostic-drain", daemon=True)
+    reader.start()
     try:
-        size = path.stat().st_size
-        with path.open("rb") as handle:
-            payload = handle.read(MAX_DIAGNOSTIC_BYTES)
-    except OSError as exc:
-        raise VideoExportError("DIAGNOSTIC_READ", str(exc), "ffmpeg") from exc
-    suffix = "\n[diagnostic truncated]" if size > MAX_DIAGNOSTIC_BYTES else ""
-    return payload.decode("utf-8", errors="replace") + suffix
+        try:
+            completed = subprocess.run(
+                arguments,
+                cwd=str(staging),
+                env=_sanitized_environment(staging),
+                stdin=subprocess.DEVNULL,
+                stdout=write_fd,
+                stderr=subprocess.STDOUT,
+                timeout=timeout,
+                shell=False,
+                check=False,
+                close_fds=True,
+                start_new_session=True,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise VideoExportError("FFMPEG_TIMEOUT", f"FFmpeg exceeded {timeout} seconds", "ffmpeg") from exc
+        except OSError as exc:
+            raise VideoExportError("FFMPEG_START", str(exc), "ffmpeg") from exc
+    finally:
+        os.close(write_fd)
+        reader.join()
+    if read_errors:
+        raise VideoExportError("DIAGNOSTIC_READ", str(read_errors[0]), "ffmpeg")
+    diagnostic = captured.decode("utf-8", errors="replace")
+    if truncated:
+        diagnostic += "\n[diagnostic truncated]"
+    return completed, diagnostic
+
+
+def _require_live_ffmpeg(context: VideoExportContext) -> None:
+    live_path, live_binding = validate_ffmpeg(
+        context.ffmpeg_path,
+        str(context.plan["ffmpeg"]["sha256"]),
+    )
+    if live_path != context.ffmpeg_path or live_binding != context.plan["ffmpeg"]:
+        raise VideoExportError("FFMPEG_BINDING", "FFmpeg executable binding changed", "ffmpeg")
 
 
 def _manifest_for_result(context: VideoExportContext, video_payload: bytes) -> dict[str, Any]:
@@ -138,10 +197,22 @@ def _file_set(directory: Path) -> set[str]:
     return files
 
 
-def _load_canonical(path: Path, field: str) -> tuple[dict[str, Any], bytes]:
-    from .video_export_core import _load_object
-
-    return _load_object(path, field)
+def _bound_preview_path(manifest: dict[str, Any], frame_preview_root: Path) -> Path:
+    binding = manifest.get("source_frame_preview")
+    if not isinstance(binding, dict) or set(binding) != {"id", "path", "sha256"}:
+        raise VideoExportError("MANIFEST_SCHEMA", "source frame preview binding is invalid", "source_frame_preview")
+    identifier, relative, digest = binding.get("id"), binding.get("path"), binding.get("sha256")
+    if not isinstance(identifier, str) or not isinstance(relative, str):
+        raise VideoExportError("MANIFEST_SCHEMA", "source frame preview ID or path is invalid", "source_frame_preview")
+    if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
+        raise VideoExportError("MANIFEST_SCHEMA", "source frame preview checksum is invalid", "source_frame_preview")
+    if relative != f"{identifier}/{FRAME_PREVIEW_MANIFEST}":
+        raise VideoExportError("SOURCE_BINDING", "source frame preview path is not canonical", "source_frame_preview")
+    base = root(frame_preview_root, must_exist=True, field="frame_preview_root")
+    _, path = safe_file(base, relative, "source_frame_preview.path")
+    if sha256(path.read_bytes()) != digest:
+        raise VideoExportError("SOURCE_BINDING", "source frame preview checksum changed", "source_frame_preview")
+    return path
 
 
 def check_video_export_package(
@@ -153,7 +224,7 @@ def check_video_export_package(
 ) -> dict[str, Any]:
     output_base = root(output_root, must_exist=True, field="output_root")
     _, resolved_manifest = relative_file(manifest_path, output_base, "video_export_manifest")
-    manifest, manifest_bytes = _load_canonical(resolved_manifest, "video_export_manifest")
+    manifest, manifest_bytes = _load_object(resolved_manifest, "video_export_manifest")
     if set(manifest) != MANIFEST_FIELDS:
         raise VideoExportError("MANIFEST_SCHEMA", "video export manifest has unexpected fields", "video_export_manifest")
     context = build_plan_context(
@@ -176,7 +247,7 @@ def check_video_export_package(
             str(package),
         )
     plan_path = package / VIDEO_EXPORT_PLAN
-    plan, plan_bytes = _load_canonical(plan_path, "video_export_plan")
+    plan, plan_bytes = _load_object(plan_path, "video_export_plan")
     if plan != context.plan or plan_bytes != context.plan_bytes:
         raise VideoExportError("PLAN_MISMATCH", "video export plan is stale or modified", VIDEO_EXPORT_PLAN)
     video_path = package / VIDEO_OUTPUT
@@ -198,23 +269,6 @@ def check_video_export_package(
         "video_sha256": sha256(video_payload),
         "video_size": len(video_payload),
     }
-
-
-def _bound_preview_path(manifest: dict[str, Any], frame_preview_root: Path) -> Path:
-    binding = manifest.get("source_frame_preview")
-    if not isinstance(binding, dict):
-        raise VideoExportError("MANIFEST_SCHEMA", "source frame preview binding is missing", "source_frame_preview")
-    relative = binding.get("path")
-    digest = binding.get("sha256")
-    if not isinstance(relative, str) or not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
-        raise VideoExportError("MANIFEST_SCHEMA", "source frame preview binding is invalid", "source_frame_preview")
-    base = root(frame_preview_root, must_exist=True, field="frame_preview_root")
-    from .video_export_core import safe_file
-
-    _, path = safe_file(base, relative, "source_frame_preview.path")
-    if sha256(path.read_bytes()) != digest:
-        raise VideoExportError("SOURCE_BINDING", "source frame preview checksum changed", "source_frame_preview")
-    return path
 
 
 def run_video_export(
@@ -254,37 +308,19 @@ def run_video_export(
             "package_path": context.plan["id"],
         }
     staging = output_base / f".{context.plan['id']}.tmp"
-    if staging.is_symlink():
-        raise VideoExportError("STAGING_SYMLINK", "staging path is a symlink", "output_root")
-    if staging.exists():
-        _cleanup(staging)
-    diagnostic = staging / "ffmpeg-diagnostic.log"
+    if staging.exists() or staging.is_symlink():
+        raise VideoExportError("STAGING_CONFLICT", "video export staging path already exists", "output_root")
     try:
         staging.mkdir()
         (staging / VIDEO_EXPORT_PLAN).write_bytes(context.plan_bytes)
+        _require_live_ffmpeg(context)
         arguments = _actual_arguments(context, staging)
-        with diagnostic.open("wb") as handle:
-            try:
-                completed = subprocess.run(
-                    arguments,
-                    cwd=str(staging),
-                    env=_sanitized_environment(staging),
-                    stdin=subprocess.DEVNULL,
-                    stdout=handle,
-                    stderr=subprocess.STDOUT,
-                    timeout=timeout,
-                    shell=False,
-                    check=False,
-                )
-            except subprocess.TimeoutExpired as exc:
-                raise VideoExportError("FFMPEG_TIMEOUT", f"FFmpeg exceeded {timeout} seconds", "ffmpeg") from exc
-            except OSError as exc:
-                raise VideoExportError("FFMPEG_START", str(exc), "ffmpeg") from exc
-        diagnostic_text = _bounded_diagnostic(diagnostic)
+        completed, diagnostic = _run_with_bounded_diagnostics(arguments, staging, timeout)
+        _require_live_ffmpeg(context)
         if completed.returncode != 0:
             raise VideoExportError(
                 "FFMPEG_FAILED",
-                f"FFmpeg exited with {completed.returncode}: {diagnostic_text}",
+                f"FFmpeg exited with {completed.returncode}: {diagnostic}",
                 "ffmpeg",
             )
         video_path = staging / VIDEO_OUTPUT
@@ -301,7 +337,6 @@ def run_video_export(
             raise VideoExportError("VIDEO_READ", "video size changed while reading", VIDEO_OUTPUT)
         manifest = _manifest_for_result(context, video_payload)
         (staging / VIDEO_EXPORT_MANIFEST).write_bytes(json_bytes(manifest))
-        diagnostic.unlink()
         if _file_set(staging) != {VIDEO_EXPORT_PLAN, VIDEO_EXPORT_MANIFEST, VIDEO_OUTPUT}:
             raise VideoExportError("STAGING_FILE_SET", "staging contains an unexpected file", str(staging))
         if destination.exists():
