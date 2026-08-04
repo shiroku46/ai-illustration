@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/ai-illustration-workspace-dashboard.schema.json",
+  "title": "AI Illustration Workspace Dashboard",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "kind",
+    "schema_version",
+    "source_workspace",
+    "project_name",
+    "complete",
+    "counts",
+    "status_sha256",
+    "network",
+    "external_process",
+    "files"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^ai-illustration-workspace-dashboard-[0-9a-f]{20}$"
+    },
+    "kind": {"const": "ai-illustration-workspace-dashboard"},
+    "schema_version": {"const": "1.0"},
+    "source_workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "sha256"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^ai-illustration-workspace-[0-9a-f]{20}$"},
+        "name": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "project_name": {"type": "string", "minLength": 1, "maxLength": 200},
+    "complete": {"type": "boolean"},
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "complete", "not_started", "blocked", "invalid"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 1, "maximum": 128},
+        "complete": {"type": "integer", "minimum": 0, "maximum": 128},
+        "not_started": {"type": "integer", "minimum": 0, "maximum": 128},
+        "blocked": {"type": "integer", "minimum": 0, "maximum": 128},
+        "invalid": {"type": "integer", "minimum": 0, "maximum": 128}
+      }
+    },
+    "status_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "network": {"const": false},
+    "external_process": {"const": false},
+    "files": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "size"],
+        "properties": {
+          "path": {
+            "enum": ["app.js", "index.html", "style.css", "workspace-data.js"]
+          },
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "size": {"type": "integer", "minimum": 1, "maximum": 16777216}
+        }
+      }
+    }
+  }
+}
