@@ -1,0 +1,262 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/paper-theater-frame-preview-package.schema.json",
+  "title": "Paper Theater Frame Preview Package",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "kind",
+    "schema_version",
+    "source_frame_render",
+    "source_audio_preview",
+    "intent",
+    "audio_license_status",
+    "canvas",
+    "scene_duration_ms",
+    "fps_num",
+    "fps_den",
+    "frame_count",
+    "audio_placement",
+    "frame_inventory",
+    "audio",
+    "playback_policy",
+    "media_copied_unchanged",
+    "video_created",
+    "files"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^paper-theater-frame-preview-package-[0-9a-f]{20}$"
+    },
+    "kind": {
+      "const": "paper-theater-frame-preview-package"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "source_frame_render": {
+      "$ref": "#/$defs/binding"
+    },
+    "source_audio_preview": {
+      "$ref": "#/$defs/binding"
+    },
+    "intent": {
+      "enum": [
+        "evaluation",
+        "production"
+      ]
+    },
+    "audio_license_status": {
+      "enum": [
+        "unreviewed",
+        "reviewing",
+        "approved",
+        "rejected"
+      ]
+    },
+    "canvas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height",
+        "background_rgba"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8192
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8192
+        },
+        "background_rgba": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          }
+        }
+      }
+    },
+    "scene_duration_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000000000000
+    },
+    "fps_num": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000
+    },
+    "fps_den": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000
+    },
+    "frame_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "audio_placement": {
+      "type": "object"
+    },
+    "frame_inventory": {
+      "$ref": "#/$defs/binding"
+    },
+    "audio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "size",
+        "duration_ms",
+        "channels",
+        "sample_rate",
+        "bits_per_sample"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^audio/[0-9a-f]{64}\\.wav$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "channels": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "sample_rate": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "bits_per_sample": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        }
+      }
+    },
+    "playback_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clock",
+        "frame_selection",
+        "final_partial_frame",
+        "transition",
+        "autoplay",
+        "network"
+      ],
+      "properties": {
+        "clock": {
+          "const": "audio-current-time-with-wall-clock-before-and-after-audio"
+        },
+        "frame_selection": {
+          "const": "rational-boundary-search-state-at-frame-start"
+        },
+        "final_partial_frame": {
+          "const": "preserved-from-source-inventory"
+        },
+        "transition": {
+          "const": "css-only-on-frame-checksum-change"
+        },
+        "autoplay": {
+          "const": false
+        },
+        "network": {
+          "const": false
+        }
+      }
+    },
+    "media_copied_unchanged": {
+      "const": true
+    },
+    "video_created": {
+      "const": false
+    },
+    "files": {
+      "type": "array",
+      "minItems": 7,
+      "items": {
+        "$ref": "#/$defs/file"
+      }
+    }
+  },
+  "$defs": {
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "size"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
