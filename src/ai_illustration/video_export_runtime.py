@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import threading
 from typing import Any
@@ -12,6 +14,7 @@ from typing import Any
 from .frame_preview import FRAME_PREVIEW_MANIFEST
 from .naming import SHA256_RE, content_identifier
 from .video_export_core import (
+    MAX_FFMPEG_BYTES,
     PACKAGE_KIND,
     VIDEO_EXPORT_MANIFEST,
     VIDEO_EXPORT_PLAN,
@@ -27,11 +30,11 @@ from .video_export_core import (
     root,
     safe_file,
     sha256,
-    validate_ffmpeg,
 )
 
 MAX_TIMEOUT_SECONDS = 3600
 MAX_DIAGNOSTIC_BYTES = 1_048_576
+STREAM_CHUNK_BYTES = 1024 * 1024
 MANIFEST_FIELDS = {
     "id",
     "kind",
@@ -54,6 +57,41 @@ def _cleanup(path: Path) -> None:
         shutil.rmtree(path)
     else:
         path.unlink()
+
+
+def _stream_sha256(path: Path, *, maximum: int, field: str) -> tuple[str, int]:
+    try:
+        before = path.stat()
+    except OSError as exc:
+        raise VideoExportError("FILE_STAT", str(exc), field) from exc
+    if not stat.S_ISREG(before.st_mode) or path.is_symlink():
+        raise VideoExportError("FILE_TYPE", f"{field} must be a regular non-symlink file", field)
+    if before.st_size < 0 or before.st_size > maximum:
+        raise VideoExportError("FILE_SIZE", f"{field} exceeds the configured limit", field)
+    total = 0
+    hasher = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            while True:
+                chunk = handle.read(STREAM_CHUNK_BYTES)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > maximum:
+                    raise VideoExportError("FILE_SIZE", f"{field} exceeds the configured limit", field)
+                hasher.update(chunk)
+        after = path.stat()
+    except VideoExportError:
+        raise
+    except OSError as exc:
+        raise VideoExportError("FILE_READ", str(exc), field) from exc
+    if (
+        total != before.st_size
+        or after.st_size != before.st_size
+        or after.st_mtime_ns != before.st_mtime_ns
+    ):
+        raise VideoExportError("FILE_CHANGED", f"{field} changed while hashing", field)
+    return hasher.hexdigest(), total
 
 
 def _actual_arguments(context: VideoExportContext, staging: Path) -> list[str]:
@@ -149,15 +187,24 @@ def _run_with_bounded_diagnostics(
 
 
 def _require_live_ffmpeg(context: VideoExportContext) -> None:
-    live_path, live_binding = validate_ffmpeg(
-        context.ffmpeg_path,
-        str(context.plan["ffmpeg"]["sha256"]),
-    )
-    if live_path != context.ffmpeg_path or live_binding != context.plan["ffmpeg"]:
-        raise VideoExportError("FFMPEG_BINDING", "FFmpeg executable binding changed", "ffmpeg")
+    path = context.ffmpeg_path
+    try:
+        metadata = path.stat()
+    except OSError as exc:
+        raise VideoExportError("FFMPEG_MISSING", str(exc), "ffmpeg") from exc
+    if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+        raise VideoExportError("FFMPEG_TYPE", "FFmpeg executable must remain a regular file", "ffmpeg")
+    if not os.access(path, os.X_OK):
+        raise VideoExportError("FFMPEG_NOT_EXECUTABLE", "FFmpeg executable permission changed", "ffmpeg")
+    expected = context.plan["ffmpeg"]
+    digest, size = _stream_sha256(path, maximum=MAX_FFMPEG_BYTES, field="ffmpeg")
+    if digest != expected["sha256"] or size != expected["size"]:
+        raise VideoExportError("FFMPEG_CHECKSUM", "FFmpeg executable binding changed", "ffmpeg")
 
 
-def _manifest_for_result(context: VideoExportContext, video_payload: bytes) -> dict[str, Any]:
+def _manifest_for_result(
+    context: VideoExportContext, video_sha256: str, video_size: int
+) -> dict[str, Any]:
     plan_binding = {
         "id": context.plan["id"],
         "path": VIDEO_EXPORT_PLAN,
@@ -165,8 +212,8 @@ def _manifest_for_result(context: VideoExportContext, video_payload: bytes) -> d
     }
     video = {
         "path": VIDEO_OUTPUT,
-        "sha256": sha256(video_payload),
-        "size": len(video_payload),
+        "sha256": video_sha256,
+        "size": video_size,
     }
     files = [
         {"path": VIDEO_EXPORT_PLAN, "sha256": sha256(context.plan_bytes), "size": len(context.plan_bytes)},
@@ -251,23 +298,19 @@ def check_video_export_package(
     if plan != context.plan or plan_bytes != context.plan_bytes:
         raise VideoExportError("PLAN_MISMATCH", "video export plan is stale or modified", VIDEO_EXPORT_PLAN)
     video_path = package / VIDEO_OUTPUT
-    if video_path.is_symlink() or not video_path.is_file():
-        raise VideoExportError("VIDEO_TYPE", "video output must be a regular file", VIDEO_OUTPUT)
-    video_payload = video_path.read_bytes()
-    if not video_payload:
-        raise VideoExportError("VIDEO_EMPTY", "video output is empty", VIDEO_OUTPUT)
     max_output = bounded_int(context.profile["max_output_bytes"], "max_output_bytes", 1, 8 * 1024 * 1024 * 1024)
-    if len(video_payload) > max_output:
-        raise VideoExportError("VIDEO_TOO_LARGE", "video output exceeds the profile limit", VIDEO_OUTPUT)
-    expected_manifest = _manifest_for_result(context, video_payload)
+    video_digest, video_size = _stream_sha256(video_path, maximum=max_output, field=VIDEO_OUTPUT)
+    if video_size <= 0:
+        raise VideoExportError("VIDEO_EMPTY", "video output is empty", VIDEO_OUTPUT)
+    expected_manifest = _manifest_for_result(context, video_digest, video_size)
     if manifest != expected_manifest or manifest_bytes != json_bytes(expected_manifest):
         raise VideoExportError("MANIFEST_MISMATCH", "video export manifest is stale or modified", VIDEO_EXPORT_MANIFEST)
     return {
         "ok": True,
         "video_export": manifest,
         "plan": context.plan,
-        "video_sha256": sha256(video_payload),
-        "video_size": len(video_payload),
+        "video_sha256": video_digest,
+        "video_size": video_size,
     }
 
 
@@ -324,18 +367,11 @@ def run_video_export(
                 "ffmpeg",
             )
         video_path = staging / VIDEO_OUTPUT
-        if video_path.is_symlink() or not video_path.is_file():
-            raise VideoExportError("VIDEO_MISSING", "FFmpeg did not produce the staged video", VIDEO_OUTPUT)
-        video_size = video_path.stat().st_size
+        max_output = bounded_int(context.profile["max_output_bytes"], "max_output_bytes", 1, 8 * 1024 * 1024 * 1024)
+        video_digest, video_size = _stream_sha256(video_path, maximum=max_output, field=VIDEO_OUTPUT)
         if video_size <= 0:
             raise VideoExportError("VIDEO_EMPTY", "FFmpeg produced an empty video", VIDEO_OUTPUT)
-        max_output = bounded_int(context.profile["max_output_bytes"], "max_output_bytes", 1, 8 * 1024 * 1024 * 1024)
-        if video_size > max_output:
-            raise VideoExportError("VIDEO_TOO_LARGE", "FFmpeg output exceeds the profile limit", VIDEO_OUTPUT)
-        video_payload = video_path.read_bytes()
-        if len(video_payload) != video_size:
-            raise VideoExportError("VIDEO_READ", "video size changed while reading", VIDEO_OUTPUT)
-        manifest = _manifest_for_result(context, video_payload)
+        manifest = _manifest_for_result(context, video_digest, video_size)
         (staging / VIDEO_EXPORT_MANIFEST).write_bytes(json_bytes(manifest))
         if _file_set(staging) != {VIDEO_EXPORT_PLAN, VIDEO_EXPORT_MANIFEST, VIDEO_OUTPUT}:
             raise VideoExportError("STAGING_FILE_SET", "staging contains an unexpected file", str(staging))
