@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/ai-illustration-mvp-release.schema.json",
+  "title": "AI Illustration Software MVP Release Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "kind",
+    "schema_version",
+    "release_name",
+    "version",
+    "python_requires",
+    "runtime_dependencies",
+    "workspace_check_kinds",
+    "main_cli_commands",
+    "dedicated_cli_commands",
+    "entry_points",
+    "critical_paths",
+    "protected_sources",
+    "external_prerequisites",
+    "human_decisions",
+    "prohibited_effects",
+    "software_completion_definition",
+    "content_completion_definition"
+  ],
+  "properties": {
+    "id": {"type": "string", "pattern": "^ai-illustration-mvp-release-[0-9a-f]{20}$"},
+    "kind": {"const": "ai-illustration-mvp-release"},
+    "schema_version": {"const": "1.0"},
+    "release_name": {"const": "AI Illustration Pipeline Software MVP"},
+    "version": {"const": "1.0.0"},
+    "python_requires": {"const": ">=3.11"},
+    "runtime_dependencies": {"type": "array", "maxItems": 0},
+    "workspace_check_kinds": {"$ref": "#/$defs/stringSet"},
+    "main_cli_commands": {"$ref": "#/$defs/stringSet"},
+    "dedicated_cli_commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workspace", "frame_preview", "video_export"],
+      "properties": {
+        "workspace": {"$ref": "#/$defs/stringSet"},
+        "frame_preview": {"$ref": "#/$defs/stringSet"},
+        "video_export": {"$ref": "#/$defs/stringSet"}
+      }
+    },
+    "entry_points": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 200}
+    },
+    "critical_paths": {"$ref": "#/$defs/pathSet"},
+    "protected_sources": {"$ref": "#/$defs/pathSet"},
+    "external_prerequisites": {"$ref": "#/$defs/stringSet"},
+    "human_decisions": {"$ref": "#/$defs/stringSet"},
+    "prohibited_effects": {"$ref": "#/$defs/stringSet"},
+    "software_completion_definition": {"type": "string", "minLength": 1, "maxLength": 1000},
+    "content_completion_definition": {"type": "string", "minLength": 1, "maxLength": 1000}
+  },
+  "$defs": {
+    "stringSet": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+    },
+    "pathSet": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[A-Za-z0-9._/-]+$",
+        "maxLength": 4096
+      }
+    }
+  }
+}
