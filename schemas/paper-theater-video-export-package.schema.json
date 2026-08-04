@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/paper-theater-video-export-package.schema.json",
+  "title": "Paper Theater Video Export Package",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "kind",
+    "schema_version",
+    "plan",
+    "source_frame_preview",
+    "profile",
+    "ffmpeg",
+    "intent",
+    "audio_license_status",
+    "video",
+    "execution",
+    "reproducibility_scope",
+    "files"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^paper-theater-video-export-package-[0-9a-f]{20}$"
+    },
+    "kind": {
+      "const": "paper-theater-video-export-package"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "plan": {
+      "$ref": "#/$defs/binding"
+    },
+    "source_frame_preview": {
+      "$ref": "#/$defs/binding"
+    },
+    "profile": {
+      "$ref": "#/$defs/binding"
+    },
+    "ffmpeg": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "sha256",
+        "size"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 536870912
+        }
+      }
+    },
+    "intent": {
+      "enum": [
+        "evaluation",
+        "production"
+      ]
+    },
+    "audio_license_status": {
+      "type": "string",
+      "minLength": 1
+    },
+    "video": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "size",
+        "container",
+        "extension"
+      ],
+      "properties": {
+        "path": {
+          "const": "video.mp4"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483648
+        },
+        "container": {
+          "const": "mp4"
+        },
+        "extension": {
+          "const": "mp4"
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "completed",
+        "shell",
+        "network"
+      ],
+      "properties": {
+        "completed": {
+          "const": true
+        },
+        "shell": {
+          "const": false
+        },
+        "network": {
+          "const": false
+        }
+      }
+    },
+    "reproducibility_scope": {
+      "const": "exact-source-profile-executable-and-recorded-output-bytes"
+    },
+    "files": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "$ref": "#/$defs/file"
+      }
+    }
+  },
+  "$defs": {
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "size"
+      ],
+      "properties": {
+        "path": {
+          "enum": [
+            "video-export-plan.json",
+            "video.mp4"
+          ]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483648
+        }
+      }
+    }
+  }
+}
