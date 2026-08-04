@@ -9,6 +9,7 @@ from typing import Any
 
 from .base import AdapterError
 from .comfyui import _scan_for_secrets as scan_for_secrets
+from ..catalog import validate_tool_profile
 from ..naming import canonical_json, content_identifier
 
 ADAPTER_ID = "comfyui-local-api"
@@ -86,7 +87,11 @@ def integer(value: Any, field: str, minimum: int, maximum: int) -> int:
     return value
 
 
-def validate_catalog_profile(value: dict[str, Any], *, expected_id: str, profile_type: str, field: str) -> None:
+def validate_catalog_profile(value: dict[str, Any], *, source_path: Path, expected_id: str, profile_type: str, field: str) -> None:
+    diagnostics = validate_tool_profile(source_path, value)
+    if diagnostics:
+        first = diagnostics[0]
+        raise AdapterError("PROFILE_VALIDATION", f"{first.code}: {first.message}", first.field or field)
     required = {
         "kind", "schema_version", "id", "version", "profile_type", "adapter_type", "runtime_type",
         "offline_capability", "deterministic_seed_support", "control_capabilities", "minimum_vram_gb",
