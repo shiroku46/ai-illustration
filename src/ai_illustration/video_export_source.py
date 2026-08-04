@@ -9,8 +9,8 @@ from .frame_preview import FRAME_PREVIEW_MANIFEST, FramePreviewError, check_fram
 from .frame_renderer import FrameRenderError, decode_rgba_png
 from .video_export_bindings import _file_inventory, _verify_file
 from .video_export_common import (
-    MAX_FRAME_COUNT, MAX_VIDEO_BYTES, VideoExportError, _bounded_int,
-    _canonical_object, _relative_file, _root, _sha,
+    MAX_FRAME_COUNT, VideoExportError, _bounded_int,
+    _canonical_object, _relative_file, _root,
 )
 
 def _source_reference(
@@ -77,7 +77,7 @@ def _source_reference(
     if not isinstance(audio, dict) or not isinstance(audio.get("path"), str):
         raise VideoExportError("AUDIO_SCHEMA", "source audio binding is missing", "audio")
     audio_path = _verify_file(package, inventory, audio["path"], "audio.path")
-    paths["audio"] = audio_path
+    paths[audio["path"]] = audio_path
     return manifest, relative, resolved, payload, package, paths
 
 
@@ -162,7 +162,7 @@ def _command_template(
         f"{scene_duration}ms",
         "-shortest",
         "-fs",
-        str(MAX_VIDEO_BYTES),
+        "2147483648",
         "-f",
         profile["container"],
         "@OUTPUT@",
