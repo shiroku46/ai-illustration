@@ -110,7 +110,8 @@
       "required": [
         "completed",
         "shell",
-        "network"
+        "network_inputs",
+        "source_copy_isolated"
       ],
       "properties": {
         "completed": {
@@ -119,8 +120,11 @@
         "shell": {
           "const": false
         },
-        "network": {
+        "network_inputs": {
           "const": false
+        },
+        "source_copy_isolated": {
+          "const": true
         }
       }
     },
