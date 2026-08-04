@@ -10,7 +10,7 @@ from .video_export_common import (
     VideoExportError, _canonical_object, _json_bytes, _relative_file,
     _root, _safe_file, _sha_file,
 )
-from .video_export_package import _package_id, _validate_result_manifest
+from .video_export_package import _package_id, _require_flat_regular_files, _validate_result_manifest
 from .video_export_plan import _build_plan, _reject_output_overlap
 
 def check_video_export_package(
@@ -42,7 +42,7 @@ def check_video_export_package(
         raise VideoExportError("MANIFEST_SCHEMA", "source frame-preview binding is missing", "source_frame_preview")
     preview_base = _root(frame_preview_root, must_exist=True, field="frame_preview_root")
     _, source_manifest = _safe_file(preview_base, source_binding["path"], "source_frame_preview.path")
-    plan, plan_bytes, _source_package, _executable_path, sources = _build_plan(
+    plan, plan_bytes, _source_package, _executable_path, _source_files, sources = _build_plan(
         source_manifest,
         profile_path,
         ffmpeg_path,
@@ -60,19 +60,11 @@ def check_video_export_package(
     if package_id != _package_id(plan):
         raise VideoExportError("MANIFEST_BINDING_MISMATCH", "package ID differs from current plan", "id")
     destination = root / package_id
-    actual: set[str] = set()
-    for candidate in destination.rglob("*"):
-        if candidate.is_symlink():
-            raise VideoExportError("PACKAGE_SYMLINK", "video export package contains a symlink", str(candidate))
-        if candidate.is_file():
-            actual.add(candidate.relative_to(destination).as_posix())
-    expected = {VIDEO_EXPORT_MANIFEST, VIDEO_EXPORT_PLAN, VIDEO_OUTPUT}
-    if actual != expected:
-        raise VideoExportError(
-            "FILE_SET_MISMATCH",
-            f"missing={sorted(expected - actual)} extra={sorted(actual - expected)}",
-            str(destination),
-        )
+    _require_flat_regular_files(
+        destination,
+        {VIDEO_EXPORT_MANIFEST, VIDEO_EXPORT_PLAN, VIDEO_OUTPUT},
+        "FILE_SET_MISMATCH",
+    )
     if (destination / VIDEO_EXPORT_PLAN).read_bytes() != plan_bytes:
         raise VideoExportError("PLAN_MISMATCH", "stored export plan differs from current source/profile/executable", VIDEO_EXPORT_PLAN)
     video_sha, video_size = _sha_file(destination / VIDEO_OUTPUT, MAX_VIDEO_BYTES, VIDEO_OUTPUT)
@@ -85,6 +77,6 @@ def check_video_export_package(
     return {
         "ok": True,
         "video_export": manifest,
-        "file_count": len(expected),
+        "file_count": 3,
         "video_size": video_size,
     }
