@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/ai-illustration-workspace.schema.json",
+  "title": "AI Illustration Workspace",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "kind", "schema_version", "project_name", "checks"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^ai-illustration-workspace-[0-9a-f]{20}$"
+    },
+    "kind": {"const": "ai-illustration-workspace"},
+    "schema_version": {"const": "1.0"},
+    "project_name": {"type": "string", "minLength": 1, "maxLength": 200},
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {"$ref": "#/$defs/check"}
+    }
+  },
+  "$defs": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "depends_on", "arguments", "action"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "maxLength": 128
+        },
+        "kind": {
+          "enum": [
+            "manifest-set",
+            "comfyui-execution",
+            "variant-set",
+            "export-package",
+            "scene-plan",
+            "preview-package",
+            "audio-preview",
+            "render-plan",
+            "renderer-job",
+            "frame-render",
+            "frame-preview",
+            "video-export"
+          ]
+        },
+        "depends_on": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          }
+        },
+        "arguments": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 32,
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "action": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/action"}
+          ]
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "label", "argv"],
+      "properties": {
+        "type": {"enum": ["command", "human"]},
+        "label": {"type": "string", "minLength": 1, "maxLength": 240},
+        "argv": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+        }
+      }
+    }
+  }
+}
