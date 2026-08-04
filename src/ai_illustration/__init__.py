@@ -1,3 +1,3 @@
-"""Manifest validation core for the AI illustration project."""
+"""Local-first software MVP for the AI illustration project."""
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
