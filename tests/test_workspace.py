@@ -1,0 +1,254 @@
+from __future__ import annotations
+
+from contextlib import redirect_stderr
+import io
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+
+from ai_illustration.naming import canonical_json, content_identifier
+from ai_illustration.workspace import (
+    DASHBOARD_MANIFEST,
+    build_workspace_dashboard,
+    check_workspace_dashboard,
+    main,
+    workspace_status,
+)
+from ai_illustration.workspace_checks import CHECKERS
+from ai_illustration.workspace_common import CHECK_SPECS, WorkspaceError, load_workspace
+
+
+def canonical(value: object) -> bytes:
+    return canonical_json(value) + b"\n"
+
+
+def workspace_document(checks: list[dict[str, object]], project_name: str = "漫才キャラクターAI") -> dict[str, object]:
+    core = {
+        "kind": "ai-illustration-workspace",
+        "schema_version": "1.0",
+        "project_name": project_name,
+        "checks": checks,
+    }
+    return {"id": content_identifier("ai-illustration-workspace", core, 20), **core}
+
+
+def manifest_check(identifier: str, artifact: str, dependencies: list[str], action: dict[str, object] | None = None) -> dict[str, object]:
+    return {
+        "id": identifier,
+        "kind": "manifest-set",
+        "depends_on": dependencies,
+        "arguments": {"path": artifact},
+        "action": action,
+    }
+
+
+class WorkspaceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.workspace_path = self.root / "workspace.json"
+        self.artifacts = self.root / "artifacts"
+        self.artifacts.mkdir()
+        self.dashboard_root = self.root / "dashboards"
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def write_workspace(self, checks: list[dict[str, object]]) -> dict[str, object]:
+        value = workspace_document(checks)
+        self.workspace_path.write_bytes(canonical(value))
+        return value
+
+    def test_status_reports_complete_not_started_blocked_and_next_action(self) -> None:
+        complete = self.artifacts / "complete.json"
+        complete.write_text("{}", encoding="utf-8")
+        checks = [
+            manifest_check("inputs", "artifacts/complete.json", []),
+            manifest_check(
+                "generation",
+                "artifacts/missing.json",
+                ["inputs"],
+                {
+                    "type": "human",
+                    "label": "ComfyUIを起動し、承認済みworkflowを実行する",
+                    "argv": [],
+                },
+            ),
+            manifest_check("variants", "artifacts/variants.json", ["generation"]),
+        ]
+        self.write_workspace(checks)
+        with patch.dict(CHECKERS, {"manifest-set": lambda arguments: {"ok": True}}, clear=False):
+            status = workspace_status(self.workspace_path)
+        self.assertEqual([item["status"] for item in status["checks"]], ["complete", "not-started", "blocked"])
+        self.assertEqual(status["counts"], {"total": 3, "complete": 1, "not_started": 1, "blocked": 1, "invalid": 0})
+        self.assertEqual(status["next"]["check_id"], "generation")
+        self.assertEqual(status["next"]["action"]["type"], "human")
+        self.assertFalse(status["network_contacted"])
+        self.assertFalse(status["external_process_started"])
+
+    def test_invalid_checker_diagnostic_does_not_expose_absolute_workspace_path(self) -> None:
+        artifact = self.artifacts / "bad.json"
+        artifact.write_text("bad", encoding="utf-8")
+        self.write_workspace([manifest_check("inputs", "artifacts/bad.json", [])])
+
+        def fail(arguments: dict[str, object]) -> dict[str, object]:
+            raise WorkspaceError("BROKEN", f"invalid at {self.root}/artifacts/bad.json", str(self.root / "artifacts/bad.json"))
+
+        with patch.dict(CHECKERS, {"manifest-set": fail}, clear=False):
+            status = workspace_status(self.workspace_path)
+        self.assertEqual(status["checks"][0]["status"], "invalid")
+        diagnostic = status["checks"][0]["diagnostics"][0]
+        self.assertNotIn(str(self.root), diagnostic["message"])
+        self.assertNotIn(str(self.root), diagnostic["field"])
+        self.assertEqual(status["next"]["status"], "invalid")
+
+    def test_complete_workspace_and_check_exit_status(self) -> None:
+        artifact = self.artifacts / "complete.json"
+        artifact.write_text("{}", encoding="utf-8")
+        self.write_workspace([manifest_check("inputs", "artifacts/complete.json", [])])
+        with patch.dict(CHECKERS, {"manifest-set": lambda arguments: {"ok": True}}, clear=False):
+            status = workspace_status(self.workspace_path)
+            stdout = io.BytesIO()
+            text = io.TextIOWrapper(stdout, encoding="utf-8")
+            with patch("sys.stdout", text), redirect_stderr(io.StringIO()):
+                exit_code = main(["check", str(self.workspace_path)])
+                text.flush()
+        self.assertTrue(status["complete"])
+        self.assertIsNone(status["next"])
+        self.assertEqual(exit_code, 0)
+
+    def test_workspace_format_failures(self) -> None:
+        valid = manifest_check("inputs", "artifacts/one.json", [])
+        cases: list[tuple[str, dict[str, object] | bytes, str]] = []
+
+        wrong_id = workspace_document([valid])
+        wrong_id["id"] = "ai-illustration-workspace-00000000000000000000"
+        cases.append(("wrong-id", wrong_id, "WORKSPACE_ID"))
+
+        duplicate = workspace_document([valid, manifest_check("inputs", "artifacts/two.json", [])])
+        cases.append(("duplicate", duplicate, "DUPLICATE_CHECK"))
+
+        forward = workspace_document([manifest_check("second", "artifacts/two.json", ["first"])])
+        cases.append(("forward", forward, "FORWARD_DEPENDENCY"))
+
+        bad_arguments = workspace_document([
+            {
+                "id": "inputs",
+                "kind": "manifest-set",
+                "depends_on": [],
+                "arguments": {"wrong": "artifacts/one.json"},
+                "action": None,
+            }
+        ])
+        cases.append(("arguments", bad_arguments, "CHECK_ARGUMENTS"))
+
+        unsafe = workspace_document([manifest_check("inputs", "/absolute/path", [])])
+        cases.append(("unsafe", unsafe, "UNSAFE_PATH"))
+
+        secret = workspace_document([
+            manifest_check(
+                "inputs",
+                "artifacts/one.json",
+                [],
+                {"type": "command", "label": "run", "argv": ["tool", "--api-token", "secret"]},
+            )
+        ])
+        cases.append(("secret", secret, "SECRET_LIKE_DATA"))
+
+        noncanonical_value = workspace_document([valid])
+        cases.append(("noncanonical", json.dumps(noncanonical_value, indent=2).encode("utf-8"), "NONCANONICAL_JSON"))
+
+        for name, value, code in cases:
+            with self.subTest(name=name):
+                payload = value if isinstance(value, bytes) else canonical(value)
+                self.workspace_path.write_bytes(payload)
+                with self.assertRaises(Exception) as caught:
+                    load_workspace(self.workspace_path)
+                self.assertEqual(getattr(caught.exception, "code", None), code)
+
+    def test_symlinked_argument_is_rejected(self) -> None:
+        outside = self.root / "outside"
+        outside.mkdir()
+        link = self.artifacts / "link"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable")
+        self.write_workspace([manifest_check("inputs", "artifacts/link/data.json", [])])
+        with self.assertRaises(WorkspaceError) as caught:
+            load_workspace(self.workspace_path)
+        self.assertEqual(caught.exception.code, "PATH_SYMLINK")
+
+    def test_registry_covers_every_workspace_kind(self) -> None:
+        self.assertEqual(set(CHECKERS), set(CHECK_SPECS))
+
+    def test_dashboard_dry_run_write_idempotency_and_check(self) -> None:
+        artifact = self.artifacts / "complete.json"
+        artifact.write_text("{}", encoding="utf-8")
+        self.write_workspace([manifest_check("inputs", "artifacts/complete.json", [])])
+        with patch.dict(CHECKERS, {"manifest-set": lambda arguments: {"ok": True}}, clear=False):
+            dry = build_workspace_dashboard(self.workspace_path, self.dashboard_root)
+            self.assertFalse(dry["written"])
+            self.assertFalse(self.dashboard_root.exists())
+            first = build_workspace_dashboard(self.workspace_path, self.dashboard_root, write=True)
+            second = build_workspace_dashboard(self.workspace_path, self.dashboard_root, write=True)
+            package = self.dashboard_root / first["package_path"]
+            checked = check_workspace_dashboard(package / DASHBOARD_MANIFEST, self.workspace_path, self.dashboard_root)
+        self.assertTrue(first["written"])
+        self.assertFalse(second["written"])
+        self.assertTrue(checked["ok"])
+        combined = "".join((package / name).read_text(encoding="utf-8") for name in ("index.html", "app.js"))
+        for forbidden in ("http:", "https:", "fetch(", "XMLHttpRequest", "WebSocket", "localStorage"):
+            self.assertNotIn(forbidden, combined)
+        self.assertIn("connect-src &#x27;none&#x27;", (package / "index.html").read_text(encoding="utf-8"))
+
+    def test_dashboard_checker_detects_tamper_extra_and_symlink(self) -> None:
+        artifact = self.artifacts / "complete.json"
+        artifact.write_text("{}", encoding="utf-8")
+        self.write_workspace([manifest_check("inputs", "artifacts/complete.json", [])])
+        with patch.dict(CHECKERS, {"manifest-set": lambda arguments: {"ok": True}}, clear=False):
+            result = build_workspace_dashboard(self.workspace_path, self.dashboard_root, write=True)
+        package = self.dashboard_root / result["package_path"]
+        app = package / "app.js"
+        original = app.read_bytes()
+        app.write_bytes(original + b"x")
+        with patch.dict(CHECKERS, {"manifest-set": lambda arguments: {"ok": True}}, clear=False):
+            with self.assertRaises(WorkspaceError) as caught:
+                check_workspace_dashboard(package / DASHBOARD_MANIFEST, self.workspace_path, self.dashboard_root)
+        self.assertEqual(caught.exception.code, "FILE_MISMATCH")
+
+        app.write_bytes(original)
+        (package / "extra.txt").write_text("extra", encoding="utf-8")
+        with patch.dict(CHECKERS, {"manifest-set": lambda arguments: {"ok": True}}, clear=False):
+            with self.assertRaises(WorkspaceError) as caught:
+                check_workspace_dashboard(package / DASHBOARD_MANIFEST, self.workspace_path, self.dashboard_root)
+        self.assertEqual(caught.exception.code, "FILE_SET")
+
+        (package / "extra.txt").unlink()
+        target = package / "style.css"
+        original_css = target.read_bytes()
+        target.unlink()
+        try:
+            target.symlink_to(self.root / "outside.css")
+        except (OSError, NotImplementedError):
+            target.write_bytes(original_css)
+            self.skipTest("symlinks unavailable")
+        with patch.dict(CHECKERS, {"manifest-set": lambda arguments: {"ok": True}}, clear=False):
+            with self.assertRaises(WorkspaceError) as caught:
+                check_workspace_dashboard(package / DASHBOARD_MANIFEST, self.workspace_path, self.dashboard_root)
+        self.assertEqual(caught.exception.code, "PACKAGE_SYMLINK")
+
+    def test_dashboard_output_overlap_is_rejected(self) -> None:
+        source_directory = self.artifacts / "source"
+        source_directory.mkdir()
+        self.write_workspace([manifest_check("inputs", "artifacts/source", [])])
+        with patch.dict(CHECKERS, {"manifest-set": lambda arguments: {"ok": True}}, clear=False):
+            with self.assertRaises(WorkspaceError) as caught:
+                build_workspace_dashboard(self.workspace_path, source_directory / "dashboard", write=True)
+        self.assertEqual(caught.exception.code, "OUTPUT_OVERLAP")
+
+
+if __name__ == "__main__":
+    unittest.main()
