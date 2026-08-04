@@ -9,6 +9,7 @@ class VideoExportRuntimeTests(VideoExportTestCase):
         self.assertTrue(first["executed"])
         destination = self.output_root / first["package_path"]
         self.assertEqual((destination / VIDEO_OUTPUT).read_bytes(), b"FAKE-MP4")
+        self.assertEqual({path.name for path in destination.iterdir()}, {VIDEO_EXPORT_MANIFEST, VIDEO_EXPORT_PLAN, VIDEO_OUTPUT})
         second = self.execute()
         self.assertFalse(second["executed"])
         with patch("ai_illustration.video_export_source.check_frame_preview_package", return_value=self._checker_result()):
@@ -29,7 +30,7 @@ class VideoExportRuntimeTests(VideoExportTestCase):
             )
         self.assertTrue(checked["ok"])
 
-    def test_process_is_shell_free_and_environment_is_sanitized(self):
+    def test_process_is_shell_free_sanitized_and_isolated(self):
         from ai_illustration import video_export_process
         captured = {}
         real = video_export_process.subprocess.Popen
@@ -37,12 +38,26 @@ class VideoExportRuntimeTests(VideoExportTestCase):
             def __new__(cls, *args, **kwargs):
                 captured.update(kwargs)
                 return real(*args, **kwargs)
+        original_frame = (self.package_dir / "frames/00000000.png").read_bytes()
         with patch.object(video_export_process.subprocess, "Popen", CapturingPopen):
             self.execute()
         self.assertIs(captured["shell"], False)
         self.assertNotIn("GITHUB_TOKEN", captured["env"])
         self.assertEqual(captured["env"]["LC_ALL"], "C")
-        self.assertEqual(captured["cwd"], self.package_dir.resolve())
+        self.assertEqual(Path(captured["cwd"]).name, "work")
+        self.assertNotEqual(Path(captured["cwd"]), self.package_dir.resolve())
+        self.assertEqual((self.package_dir / "frames/00000000.png").read_bytes(), original_frame)
+
+    def test_executable_cannot_publish_extra_staging_files(self):
+        self.ffmpeg.write_text(
+            f"#!{sys.executable}\nimport pathlib,sys\nout=pathlib.Path(sys.argv[-1]);out.write_bytes(b'OK');out.with_name('extra.txt').write_text('extra')\n",
+            encoding="utf-8",
+        )
+        self.ffmpeg.chmod(self.ffmpeg.stat().st_mode | stat.S_IXUSR)
+        with self.assertRaises(VideoExportError) as caught:
+            self.execute()
+        self.assertEqual(caught.exception.code, "STAGING_FILE_SET")
+        self.assertEqual(list(self.output_root.glob(".*.tmp")), [])
 
     def test_failure_cleans_staging(self):
         self.ffmpeg.write_text(f"#!{sys.executable}\nimport sys\nsys.exit(7)\n", encoding="utf-8")
@@ -97,7 +112,7 @@ class VideoExportRuntimeTests(VideoExportTestCase):
         self.assertEqual(oversized.exception.code, "FILE_TOO_LARGE")
         self.assertEqual(list(self.output_root.glob(".*.tmp")), [])
 
-    def test_checker_rejects_extra_and_symlink_files(self):
+    def test_checker_rejects_extra_empty_directory_and_symlink_files(self):
         result = self.execute()
         destination = self.output_root / result["package_path"]
         extra = destination / "extra.txt"
@@ -111,6 +126,17 @@ class VideoExportRuntimeTests(VideoExportTestCase):
                 )
         self.assertEqual(extra_error.exception.code, "FILE_SET_MISMATCH")
         extra.unlink()
+        empty_dir = destination / "unexpected-dir"
+        empty_dir.mkdir()
+        with patch("ai_illustration.video_export_source.check_frame_preview_package", return_value=self._checker_result()):
+            with self.assertRaises(VideoExportError) as directory_error:
+                check_video_export_package(
+                    destination / VIDEO_EXPORT_MANIFEST, self.profile_path, self.ffmpeg, self.output_root,
+                    self.frame_preview_root, self.frame_render_root, self.renderer_root, self.plan_root,
+                    self.audio_preview_root, self.preview_root, self.package_root, self.audio_root, self.profile_root,
+                )
+        self.assertEqual(directory_error.exception.code, "FILE_SET_MISMATCH")
+        empty_dir.rmdir()
         target = destination / VIDEO_OUTPUT
         outside = self.base / "outside.mp4"
         outside.write_bytes(b"outside")
@@ -126,7 +152,7 @@ class VideoExportRuntimeTests(VideoExportTestCase):
                     self.frame_preview_root, self.frame_render_root, self.renderer_root, self.plan_root,
                     self.audio_preview_root, self.preview_root, self.package_root, self.audio_root, self.profile_root,
                 )
-        self.assertEqual(symlinked.exception.code, "PACKAGE_SYMLINK")
+        self.assertEqual(symlinked.exception.code, "FILE_SET_MISMATCH")
 
     def test_checker_rejects_profile_and_executable_changes(self):
         result = self.execute()
