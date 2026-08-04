@@ -13,6 +13,9 @@ from .video_export_common import (
     _canonical_object, _relative_file, _root,
 )
 
+SourceFile = tuple[Path, str, int]
+
+
 def _source_reference(
     manifest_path: Path,
     frame_preview_root: Path,
@@ -23,7 +26,7 @@ def _source_reference(
     preview_root: Path,
     package_root: Path,
     audio_root: Path,
-) -> tuple[dict[str, Any], str, Path, bytes, Path, dict[str, Path]]:
+) -> tuple[dict[str, Any], str, Path, bytes, Path, dict[str, SourceFile]]:
     preview_base = _root(frame_preview_root, must_exist=True, field="frame_preview_root")
     relative, resolved = _relative_file(manifest_path, preview_base, "frame_preview_manifest")
     try:
@@ -62,7 +65,7 @@ def _source_reference(
     height = _bounded_int(canvas.get("height"), "canvas.height", 1, 8192)
     if width % 2 or height % 2:
         raise VideoExportError("ODD_DIMENSIONS", "mp4-h264-aac-v1 requires even width and height", "canvas")
-    paths: dict[str, Path] = {}
+    paths: dict[str, SourceFile] = {}
     for index in range(frame_count):
         relative_frame = f"frames/{index:08d}.png"
         frame_path = _verify_file(package, inventory, relative_frame, f"frames[{index}]")
@@ -72,12 +75,14 @@ def _source_reference(
             raise VideoExportError(f"FRAME_{exc.code}", exc.message, relative_frame) from exc
         if any(image.pixels[offset] != 255 for offset in range(3, len(image.pixels), 4)):
             raise VideoExportError("NONOPAQUE_FRAME", "profile requires every source pixel to be opaque", relative_frame)
-        paths[relative_frame] = frame_path
+        item = inventory[relative_frame]
+        paths[relative_frame] = (frame_path, item["sha256"], item["size"])
     audio = manifest.get("audio")
     if not isinstance(audio, dict) or not isinstance(audio.get("path"), str):
         raise VideoExportError("AUDIO_SCHEMA", "source audio binding is missing", "audio")
     audio_path = _verify_file(package, inventory, audio["path"], "audio.path")
-    paths[audio["path"]] = audio_path
+    audio_item = inventory[audio["path"]]
+    paths[audio["path"]] = (audio_path, audio_item["sha256"], audio_item["size"])
     return manifest, relative, resolved, payload, package, paths
 
 
