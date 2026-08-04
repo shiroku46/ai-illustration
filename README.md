@@ -1,125 +1,112 @@
-# AI Illustration Pipeline
+# AI Illustration Pipeline 1.0
 
-Local-first development for a fixed two-woman manzai character illustration workflow.
+Local-first, verified software for creating and reviewing two fixed female manzai characters and assembling their approved assets into synchronized paper-theater previews and local video exports.
 
-## Current capability
+## Software MVP status
 
-The repository defines product, architecture, style, and asset contracts and includes:
+The repository implements the complete software path from approved local generation inputs through:
 
-- a fixture-only manifest validation core;
-- a deterministic local tool/hardware catalog;
-- a non-executing ComfyUI API-workflow adapter that validates workflows and creates dry-run execution plans;
-- a read-only local candidate comparison UI that exports structured review-decision JSON in the browser;
-- deterministic expression/pose variant-set planning bound to one accepted candidate identity;
-- deterministic packaging of caller-supplied local variant PNGs by verified byte copy, with sidecars and a paper-theater lookup index;
-- deterministic paper-theater scene, offline preview, WAV synchronization, and renderer-neutral final render-plan compilation.
+- deterministic manifest and provenance validation;
+- local tool/model evidence, compatibility, licensing, and installation profiles;
+- fixed-seed ComfyUI workflow planning;
+- explicit strict-loopback ComfyUI execution with deterministic candidate packaging;
+- local candidate comparison and structured human review;
+- reviewed expression/pose variant planning;
+- checksum-verified transparent PNG export packages;
+- two-character scene and timeline planning;
+- fully offline image and WAV playback previews;
+- rational frame planning and explicit composition profiles;
+- deterministic RGBA frame rendering;
+- offline rendered-frame playback;
+- explicit-profile local FFmpeg video export;
+- multi-track owner workspace status and an offline progress dashboard;
+- stage-specific integrity checking throughout the pipeline.
 
-It does **not** install a model, start ComfyUI, contact a server, generate, edit, resize, re-encode, or render media. Export packaging reads local PNGs and WAV files, verifies them, and copies their bytes unchanged only when `--write` is explicitly supplied. Render plans are text-only and never contain an executable renderer command.
-
-Six production manifest types are supported: character specification, style profile, generation request, candidate asset, review decision, and export manifest. Variant-set plans, export packages, paper-theater scene plans, offline previews, audio previews, and render plans are additional deterministic documents for downstream production stages.
-
-The tool-evaluation catalog can validate synthetic tool/model profiles, list them deterministically, and compare declared hardware requirements with a local hardware profile. Compatibility never implies license or commercial-use approval.
-
-The ComfyUI adapter accepts only loopback HTTP endpoints, rejects credentials and secret-like values, binds only explicitly allowlisted workflow inputs, records deterministic workflow checksums, and always remains in dry-run mode.
-
-The review UI binds only to `127.0.0.1`, serves local static files and validated candidate PNGs only, never writes server-side files, and creates review JSON as a browser download.
-
-Variant planning requires one `technically_valid` candidate, verified source PNG bytes, and the latest exact candidate/request/checksum-bound review to be `accept`. It emits stable variant IDs, planned PNG and sidecar paths, dimensions, identity bindings, unresolved design decisions, and paper-theater lookup keys without writing image bytes.
-
-Variant export requires exactly one supplied local `<variant-id>.png` for every planned variant. It verifies PNG structure, dimensions, sRGB, alpha, and SHA-256; copies bytes unchanged into an atomic package; writes deterministic sidecars, a checksum inventory, and a paper-theater index; and rejects extra, missing, conflicting, escaped, or modified files.
-
-## Run without installation
+Version `1.0.0` is certified by the canonical release contract at `release/mvp-v1.json` and the read-only release audit.
 
 ```bash
-PYTHONPATH=src python -m ai_illustration.cli validate tests/fixtures/valid
-PYTHONPATH=src python -m ai_illustration.cli catalog-validate tests/fixtures/catalog/tool-profile.json
-PYTHONPATH=src python -m ai_illustration.cli catalog-list tests/fixtures/catalog/tool-profile.json
-PYTHONPATH=src python -m ai_illustration.cli catalog-compat tests/fixtures/catalog/tool-profile.json tests/fixtures/catalog/hardware-profile.json
-PYTHONPATH=src python -m ai_illustration.cli adapter-check tests/fixtures/comfyui/workflow-api.json
-PYTHONPATH=src python -m ai_illustration.cli adapter-plan tests/fixtures/valid/generation-request.json tests/fixtures/comfyui/workflow-api.json --bindings tests/fixtures/comfyui/bindings.json
-PYTHONPATH=src python -m ai_illustration.cli review-ui path/to/manifest-directory --asset-root path/to/asset-directory --port 8765
-PYTHONPATH=src python -m ai_illustration.cli variant-plan path/to/manifest-directory --source-candidate candidate-id --matrix tests/fixtures/variants/matrix.json --intent evaluation
-PYTHONPATH=src python -m ai_illustration.cli variant-check path/to/variant-set.json --manifest-root path/to/manifest-directory
-PYTHONPATH=src python -m ai_illustration.cli variant-export path/to/variant-set.json --manifest-root path/to/manifest-directory --source-root path/to/supplied-variant-pngs --output-root path/to/packages
-PYTHONPATH=src python -m ai_illustration.cli variant-export path/to/variant-set.json --manifest-root path/to/manifest-directory --source-root path/to/supplied-variant-pngs --output-root path/to/packages --write
-PYTHONPATH=src python -m ai_illustration.cli variant-export path/to/production-variant-set.json --manifest-root path/to/manifest-directory --source-root path/to/supplied-variant-pngs --approval-root path/to/variant-reviews --output-root path/to/packages --write
-PYTHONPATH=src python -m ai_illustration.cli export-check path/to/packages/variant-export-package-ID/package-manifest.json --output-root path/to/packages
-PYTHONPATH=src python -m ai_illustration.cli render-plan path/to/audio-previews/paper-theater-audio-preview-ID/audio-preview-manifest.json --audio-preview-root path/to/audio-previews --preview-root path/to/previews --package-root path/to/packages --audio-root path/to/audio --output-root path/to/render-plans --fps-num 30000 --fps-den 1001
-PYTHONPATH=src python -m ai_illustration.cli render-plan path/to/audio-previews/paper-theater-audio-preview-ID/audio-preview-manifest.json --audio-preview-root path/to/audio-previews --preview-root path/to/previews --package-root path/to/packages --audio-root path/to/audio --output-root path/to/render-plans --fps-num 30000 --fps-den 1001 --write
-PYTHONPATH=src python -m ai_illustration.cli render-plan-check path/to/render-plans/paper-theater-render-plan-ID/render-plan-manifest.json --output-root path/to/render-plans --audio-preview-root path/to/audio-previews --preview-root path/to/previews --package-root path/to/packages --audio-root path/to/audio
+PYTHONPATH=src python -m ai_illustration.release_audit release/mvp-v1.json
+```
+
+The software has no runtime Python dependencies and does not install, download, or select ComfyUI, models, custom nodes, or FFmpeg.
+
+## Owner workspace
+
+A workspace can represent boke and tsukkomi as parallel tracks and join them at the shared paper-theater stages.
+
+```bash
+PYTHONPATH=src python -m ai_illustration.workspace status path/to/workspace.json
+PYTHONPATH=src python -m ai_illustration.workspace build \
+  path/to/workspace.json \
+  --output-root path/to/dashboards \
+  --write
+```
+
+Each declared stage is reported as `complete`, `not-started`, `blocked`, or `invalid`. A stage is complete only when its existing full repository checker succeeds. Caller-authored next actions are displayed but never executed.
+
+## Generation boundary
+
+Dry-run workflow planning remains available:
+
+```bash
+PYTHONPATH=src python -m ai_illustration.cli adapter-plan \
+  path/to/generation-request.json \
+  path/to/workflow-api.json \
+  --bindings path/to/bindings.json
+```
+
+Actual generation requires explicit approved request/tool/model/execution profiles, an already-running local ComfyUI instance, and `--execute`:
+
+```bash
+PYTHONPATH=src python -m ai_illustration.cli adapter-run \
+  path/to/generation-request.json \
+  path/to/workflow-api.json \
+  --bindings path/to/bindings.json \
+  --tool-profile path/to/tool-profile.json \
+  --model-profile path/to/model-profile.json \
+  --execution-profile path/to/execution-profile.json \
+  --endpoint http://127.0.0.1:8188 \
+  --output-root path/to/candidate-packages \
+  --execute
+```
+
+Only strict loopback HTTP routes are available. Proxies, redirects, credentials, cookies, LAN/cloud hosts, returned URLs, websocket access, and arbitrary endpoints are disabled. Generated candidates remain technically valid but unreviewed.
+
+## Review and paper-theater path
+
+The main CLI provides commands for:
+
+- `review-ui`;
+- `variant-plan` and `variant-check`;
+- `variant-export` and `export-check`;
+- `paper-plan` and `paper-check`;
+- `preview-plan` and `preview-check`;
+- `audio-preview-plan` and `audio-preview-check`;
+- `render-plan` and `render-plan-check`;
+- `composition-job` and `composition-job-check`;
+- `frame-render` and `frame-render-check`.
+
+All writes are explicit, content-addressed where applicable, and fail closed on stale bindings, path escape, symlinks, missing or extra files, and byte modification.
+
+## Rendered preview and video export
+
+```bash
+PYTHONPATH=src python -m ai_illustration.frame_preview build ... --write
+PYTHONPATH=src python -m ai_illustration.video_export plan ...
+PYTHONPATH=src python -m ai_illustration.video_export run ... --timeout-seconds 1800
+PYTHONPATH=src python -m ai_illustration.video_export check ...
+```
+
+Video export requires one caller-authored profile and one exact checksum-pinned local FFmpeg executable. It uses no shell and publishes only after bounded isolated execution and complete result verification.
+
+## Validation
+
+```bash
+python scripts/public_export_guard.py .
+python scripts/validate_repository.py
 PYTHONPATH=src python -m unittest discover -s tests
 ```
 
-Commands write deterministic machine-readable JSON to stdout, a short summary to stderr, and return nonzero for invalid data. The long-running `review-ui` command prints its local URL and stops with `Ctrl+C`.
+## Completion boundary
 
-## Renderer-neutral final render plans
-
-`render-plan` first performs the complete current Phase 9 integrity check, including the upstream preview, scene/package, PNG, and local WAV bindings. It accepts a positive rational frame rate as `--fps-num` and `--fps-den`, uses integer arithmetic only, and rounds the total frame count upward so the final partial frame is never truncated.
-
-Every frame records an exact rational millisecond interval and uses the scene state at the frame start. Adjacent frames with identical boke/tsukkomi assets and stage slots are collapsed into deterministic spans. The plan preserves PNG and WAV checksums, signed rational audio-sample placement, synchronization policy, intent, licensing state, dimensions, and upstream provenance.
-
-Dry run is the default. `--write` atomically publishes only canonical JSON files in a content-addressed directory. Existing byte-identical output is accepted; differing, missing, extra, traversing, or symlinked files fail closed. `render-plan-check` rebuilds the expected plan from the currently verified Phase 9 package and rejects stale timing, spans, checksums, or source bindings. No video, image, or audio media is created.
-
-## Local candidate review
-
-The manifest directory may contain character specifications, generation requests, candidate assets, and prior review decisions. Candidate images are optional: a missing, invalid, checksum-mismatched, non-sRGB, or non-alpha PNG is represented by a metadata placeholder rather than being served.
-
-The browser UI supports deterministic candidate ordering, role/character/expression/pose/review filters, comparison of up to four candidates, provenance and checksum inspection, and structured decisions using the anti-AI and identity-drift categories. Downloaded review JSON includes the immutable candidate checksum and source request ID and can be validated with the existing `validate` command after it is placed with the referenced manifests.
-
-Security boundaries:
-
-- the listener is fixed to `127.0.0.1`;
-- only `GET` and `HEAD` are accepted;
-- static routes and candidate-image routes are explicit;
-- manifest and asset paths must remain beneath their configured roots, including after symlink resolution;
-- no remote scripts, fonts, analytics, cookies, storage dependency, uploads, or server-side mutation are used.
-
-## Reviewed variant planning
-
-A matrix explicitly supplies each requested expression, pose, facing, crop, and optional mouth state. Input order does not affect output. Duplicate combinations, unsafe tokens, stale reviews, mismatched checksums or references, unavailable or tampered candidates, unknown provenance, and unapproved production licensing fail closed.
-
-Unresolved stage side, canvas override, editable source format, layer strategy, and mouth-shape granularity remain explicit nullable fields rather than inferred defaults. Evaluation plans remain non-commercial; production plans require approved source request, character, and style licensing states.
-
-## Verified local export packages
-
-The source directory is intentionally strict: it contains only one flat `<variant-id>.png` per canonical variant. Fuzzy lookup, nested source paths, symlinks, and extra files are rejected. Dry run is the default and leaves the output root untouched.
-
-With `--write`, all outputs are built in a temporary directory beneath the output root and atomically published as one content-addressed package directory. Existing identical packages are accepted idempotently; differing packages are never overwritten. `export-check` verifies canonical package JSON and the SHA-256 inventory for every PNG, sidecar, and paper-theater index file.
-
-Evaluation packages remain explicitly non-production and do not accept an approval root. Production packaging additionally requires one canonical `<variant-id>.json` review in `--approval-root` for every supplied PNG. Each review must be `accept` and bind the exact variant-set ID, variant ID, and supplied PNG SHA-256. A reviewed source identity and approved licensing alone do not approve newly supplied variant artwork.
-
-A production variant review has exactly these fields:
-
-```json
-{
-  "id": "variant-review-<content hash>",
-  "kind": "variant-review-decision",
-  "schema_version": "1.0",
-  "variant_set_ref": "variant-set-...",
-  "variant_id": "variant-...",
-  "png_sha256": "<64 lowercase hex>",
-  "decision": "accept",
-  "reviewer": "owner"
-}
-```
-
-The ID is the normal deterministic `variant-review` content identifier calculated from all fields except `id`.
-
-## Validation boundaries
-
-The manifest core checks deterministic identifiers and export paths, safe relative paths, SHA-256 format, dimensions, sRGB and alpha declarations, provenance, licensing state, review readiness, and cross-document references.
-
-The catalog distinguishes:
-
-- `hard-incompatible`: declared operating system, RAM, VRAM, runtime, adapter, or offline requirements fail;
-- `missing-evidence`: hardware declarations pass but evidence or licensing review is incomplete;
-- `compatible-by-declaration`: declared hardware requirements pass and required evidence fields are present.
-
-The adapter distinguishes planning from authorization:
-
-- every plan has `dry_run: true`;
-- unresolved model identifiers or non-approved model license state set `executable_ready: false`;
-- `execute()` is deliberately disabled;
-- no socket, subprocess, external request, model loading, or image output is performed.
-
-No compatibility, adapter, review, variant-planning, export-packaging, preview, audio-preview, or render-plan result grants a license or approves commercial use.
+Software completion does not mean final character art, model licensing, commercial approval, recorded audio, or publication decisions were supplied automatically. Those remain explicit owner and human-review prerequisites. See `docs/MVP_COMPLETION.md` for the exact distinction.
