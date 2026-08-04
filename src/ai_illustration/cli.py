@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import sys
 
-from .adapters import AdapterError, ComfyUIAdapter, load_json_object
+from .adapters import AdapterError, ComfyUIAdapter, check_comfyui_execution, load_json_object, run_comfyui_execution
 from .audio_preview import AudioPreviewError, build_audio_preview_package, check_audio_preview_package
 from .catalog import catalog_listing, evaluate_compatibility, load_catalog, validate_hardware_profile
 from .composition import CompositionError, build_composition_job_package, check_composition_job_package
@@ -25,6 +25,19 @@ from .variants import VariantError, check_variant_set, load_json_object as load_
 def _root_args(parser: argparse.ArgumentParser, *names: str) -> None:
     for name in names:
         parser.add_argument(f"--{name.replace('_', '-')}", dest=name, type=Path, required=True)
+
+
+def _adapter_execution_args(parser: argparse.ArgumentParser, *, include_manifest: bool = False) -> None:
+    if include_manifest:
+        parser.add_argument("execution_manifest", type=Path)
+    parser.add_argument("request", type=Path)
+    parser.add_argument("workflow", type=Path)
+    parser.add_argument("--bindings", type=Path, required=True)
+    parser.add_argument("--tool-profile", type=Path, required=True)
+    parser.add_argument("--model-profile", type=Path, required=True)
+    parser.add_argument("--execution-profile", type=Path, required=True)
+    parser.add_argument("--endpoint", default="http://127.0.0.1:8188")
+    parser.add_argument("--output-root", type=Path, required=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -47,6 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
     adapter_plan.add_argument("workflow", type=Path)
     adapter_plan.add_argument("--bindings", type=Path)
     adapter_plan.add_argument("--endpoint", default="http://127.0.0.1:8188")
+    adapter_run = commands.add_parser("adapter-run")
+    _adapter_execution_args(adapter_run)
+    adapter_run.add_argument("--execute", action="store_true")
+    adapter_run_check = commands.add_parser("adapter-run-check")
+    _adapter_execution_args(adapter_run_check, include_manifest=True)
 
     review = commands.add_parser("review-ui")
     review.add_argument("manifest_root", type=Path)
@@ -215,6 +233,13 @@ def main(argv: list[str] | None = None) -> int:
             bindings = load_json_object(args.bindings or args.workflow.with_name("bindings.json"))
             plan = adapter.plan(load_json_object(args.request), workflow, bindings, endpoint=args.endpoint)
             return _emit({"ok": True, "plan": plan.to_dict()}, "adapter dry-run plan created", True)
+
+        if command == "adapter-run":
+            result = run_comfyui_execution(args.request, args.workflow, args.bindings, args.tool_profile, args.model_profile, args.execution_profile, args.output_root, endpoint=args.endpoint, execute=args.execute)
+            return _emit(result, f"{'reused' if result['reused'] else 'materialized'} ComfyUI candidate package with {result['execution']['candidate_count']} candidate(s)", True)
+        if command == "adapter-run-check":
+            result = check_comfyui_execution(args.execution_manifest, args.output_root, args.request, args.workflow, args.bindings, args.tool_profile, args.model_profile, args.execution_profile, endpoint=args.endpoint)
+            return _emit(result, f"verified ComfyUI execution package with {result['candidate_count']} candidate(s) without network access", True)
 
         catalog_path = args.path if command != "catalog-compat" else args.catalog
         profiles, diagnostics = load_catalog(catalog_path)
