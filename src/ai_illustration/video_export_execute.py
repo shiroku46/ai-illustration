@@ -88,10 +88,12 @@ def run_video_export(
             "written": False,
         }
     staging = root / f".{package_id}.tmp"
-    if staging.exists():
-        if staging.is_symlink():
-            raise VideoExportError("STAGING_CONFLICT", "staging path is a symlink", "output_root")
-        shutil.rmtree(staging)
+    if staging.exists() or staging.is_symlink():
+        raise VideoExportError(
+            "STAGING_CONFLICT",
+            "video export staging path already exists and is not owned by this run",
+            "output_root",
+        )
     try:
         staging.mkdir()
         stored_plan = staging / VIDEO_EXPORT_PLAN

@@ -12,27 +12,54 @@ from .video_export_common import (
     MAX_DIAGNOSTIC_BYTES, MAX_TIMEOUT_SECONDS, VideoExportError, _bounded_int,
 )
 
-def _sanitized_environment() -> dict[str, str]:
-    allowed = ("SystemRoot", "WINDIR", "TMP", "TEMP", "TMPDIR", "HOME", "USERPROFILE")
-    result = {key: os.environ[key] for key in allowed if key in os.environ}
-    result.update({"LC_ALL": "C", "LANG": "C", "TZ": "UTC"})
+
+def _sanitized_environment(cwd: Path) -> dict[str, str]:
+    result = {
+        key: os.environ[key]
+        for key in ("SystemRoot", "WINDIR")
+        if key in os.environ
+    }
+    isolated = str(cwd.resolve())
+    result.update(
+        {
+            "HOME": isolated,
+            "USERPROFILE": isolated,
+            "TMP": isolated,
+            "TEMP": isolated,
+            "TMPDIR": isolated,
+            "LC_ALL": "C",
+            "LANG": "C",
+            "TZ": "UTC",
+        }
+    )
     return result
 
 
-def _drain_pipe(pipe: BinaryIO, sink: bytearray, overflow: threading.Event, process: subprocess.Popen[bytes]) -> None:
+def _drain_pipe(
+    pipe: BinaryIO,
+    sink: bytearray,
+    overflow: threading.Event,
+    process: subprocess.Popen[bytes],
+    total: list[int],
+    lock: threading.Lock,
+) -> None:
     try:
         while True:
             chunk = pipe.read(64 * 1024)
             if not chunk:
                 return
-            if len(sink) + len(chunk) > MAX_DIAGNOSTIC_BYTES:
-                overflow.set()
-                try:
-                    process.kill()
-                except OSError:
-                    pass
-                return
-            sink.extend(chunk)
+            with lock:
+                if total[0] + len(chunk) > MAX_DIAGNOSTIC_BYTES:
+                    overflow.set()
+                else:
+                    sink.extend(chunk)
+                    total[0] += len(chunk)
+                    continue
+            try:
+                process.kill()
+            except OSError:
+                pass
+            return
     finally:
         try:
             pipe.close()
@@ -46,7 +73,7 @@ def _run_process(arguments: list[str], cwd: Path, timeout_seconds: int) -> tuple
         process: subprocess.Popen[bytes] = subprocess.Popen(
             arguments,
             cwd=cwd,
-            env=_sanitized_environment(),
+            env=_sanitized_environment(cwd),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -58,9 +85,19 @@ def _run_process(arguments: list[str], cwd: Path, timeout_seconds: int) -> tuple
     stdout = bytearray()
     stderr = bytearray()
     overflow = threading.Event()
+    total = [0]
+    lock = threading.Lock()
     threads = [
-        threading.Thread(target=_drain_pipe, args=(process.stdout, stdout, overflow, process), daemon=True),
-        threading.Thread(target=_drain_pipe, args=(process.stderr, stderr, overflow, process), daemon=True),
+        threading.Thread(
+            target=_drain_pipe,
+            args=(process.stdout, stdout, overflow, process, total, lock),
+            daemon=True,
+        ),
+        threading.Thread(
+            target=_drain_pipe,
+            args=(process.stderr, stderr, overflow, process, total, lock),
+            daemon=True,
+        ),
     ]
     for thread in threads:
         thread.start()
