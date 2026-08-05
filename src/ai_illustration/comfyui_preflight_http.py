@@ -8,7 +8,12 @@ import socket
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit, urlunsplit
-from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+from urllib.request import (
+    HTTPRedirectHandler,
+    ProxyHandler,
+    Request,
+    build_opener,
+)
 
 from .adapters.base import AdapterError
 from .adapters.comfyui import sanitize_loopback_endpoint
@@ -19,8 +24,20 @@ MAX_ENCODED_SEGMENT_CHARS = 1024
 
 
 class _RejectRedirects(HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
-        raise AdapterError("HTTP_REDIRECT", "redirects are forbidden", req.full_url)
+    def redirect_request(  # type: ignore[no-untyped-def]
+        self,
+        req,
+        fp,
+        code,
+        msg,
+        headers,
+        newurl,
+    ):
+        raise AdapterError(
+            "HTTP_REDIRECT",
+            "redirects are forbidden",
+            req.full_url,
+        )
 
 
 @dataclass(frozen=True)
@@ -32,14 +49,41 @@ class PreflightHttpLimits:
 
     def __post_init__(self) -> None:
         for field, value, minimum, maximum in (
-            ("system_response_bytes", self.system_response_bytes, 128, 4 * 1024 * 1024),
-            ("models_response_bytes", self.models_response_bytes, 128, 16 * 1024 * 1024),
-            ("node_response_bytes", self.node_response_bytes, 128, 4 * 1024 * 1024),
+            (
+                "system_response_bytes",
+                self.system_response_bytes,
+                128,
+                4 * 1024 * 1024,
+            ),
+            (
+                "models_response_bytes",
+                self.models_response_bytes,
+                128,
+                16 * 1024 * 1024,
+            ),
+            (
+                "node_response_bytes",
+                self.node_response_bytes,
+                128,
+                4 * 1024 * 1024,
+            ),
         ):
-            if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
-                raise AdapterError("PREFLIGHT_LIMIT", f"{field} is outside its safe range", field)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not minimum <= value <= maximum
+            ):
+                raise AdapterError(
+                    "PREFLIGHT_LIMIT",
+                    f"{field} is outside its safe range",
+                    field,
+                )
         timeout = self.request_timeout_seconds
-        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0.05 <= timeout <= 300:
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not 0.05 <= timeout <= 300
+        ):
             raise AdapterError(
                 "PREFLIGHT_LIMIT",
                 "request_timeout_seconds must be from 0.05 to 300",
@@ -54,7 +98,10 @@ def encode_node_class(node_class: str) -> str:
         or len(node_class) > MAX_NODE_CLASS_CHARS
         or node_class != node_class.strip()
         or not node_class.isprintable()
-        or any(character in node_class for character in ("/", "\\", "?", "#", "\x00"))
+        or any(
+            character in node_class
+            for character in ("/", "\\", "?", "#", "\x00")
+        )
     ):
         raise AdapterError(
             "NODE_CLASS_ROUTE",
@@ -62,7 +109,11 @@ def encode_node_class(node_class: str) -> str:
             "node_class",
         )
     encoded = quote(node_class, safe="")
-    if not encoded or len(encoded) > MAX_ENCODED_SEGMENT_CHARS or "/" in encoded:
+    if (
+        not encoded
+        or len(encoded) > MAX_ENCODED_SEGMENT_CHARS
+        or "/" in encoded
+    ):
         raise AdapterError(
             "NODE_CLASS_ROUTE",
             "encoded node class exceeds the route limit",
@@ -85,17 +136,28 @@ def _json_value(payload: bytes, field: str) -> Any:
         return result
 
     try:
-        return json.loads(payload.decode("utf-8"), object_pairs_hook=pairs)
+        return json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=pairs,
+        )
     except AdapterError:
         raise
     except (UnicodeError, json.JSONDecodeError) as exc:
-        raise AdapterError("INVALID_HTTP_JSON", str(exc), field) from exc
+        raise AdapterError(
+            "INVALID_HTTP_JSON",
+            str(exc),
+            field,
+        ) from exc
 
 
 class ComfyUIPreflightHttpClient:
-    """Read-only client constrained to one loopback origin and three route families."""
+    """Read-only client limited to one loopback origin and three route families."""
 
-    def __init__(self, endpoint: str, limits: PreflightHttpLimits | None = None) -> None:
+    def __init__(
+        self,
+        endpoint: str,
+        limits: PreflightHttpLimits | None = None,
+    ) -> None:
         sanitized = sanitize_loopback_endpoint(endpoint)
         parsed = urlsplit(sanitized)
         if parsed.hostname == "localhost":
@@ -106,7 +168,10 @@ class ComfyUIPreflightHttpClient:
         else:
             self.endpoint = sanitized
         self.limits = limits or PreflightHttpLimits()
-        self._opener = build_opener(ProxyHandler({}), _RejectRedirects())
+        self._opener = build_opener(
+            ProxyHandler({}),
+            _RejectRedirects(),
+        )
         self.requested_routes: list[str] = []
 
     @staticmethod
@@ -116,11 +181,20 @@ class ComfyUIPreflightHttpClient:
         if not path.startswith("/object_info/"):
             return False
         suffix = path[len("/object_info/") :]
-        return bool(suffix) and "/" not in suffix and "?" not in suffix and "#" not in suffix
+        return (
+            bool(suffix)
+            and "/" not in suffix
+            and "?" not in suffix
+            and "#" not in suffix
+        )
 
     def _request(self, path: str, *, maximum: int) -> bytes:
         if not self._authorized_path(path):
-            raise AdapterError("HTTP_ROUTE", "route is not authorized for preflight", path)
+            raise AdapterError(
+                "HTTP_ROUTE",
+                "route is not authorized for preflight",
+                path,
+            )
         url = self.endpoint + path
         request = Request(
             url,
@@ -136,20 +210,46 @@ class ComfyUIPreflightHttpClient:
         except AdapterError:
             raise
         except HTTPError as exc:
-            raise AdapterError("HTTP_STATUS", f"HTTP {exc.code}", path) from exc
+            status = exc.code
+            exc.close()
+            raise AdapterError(
+                "HTTP_STATUS",
+                f"HTTP {status}",
+                path,
+            ) from exc
         except URLError as exc:
             reason = exc.reason
             if isinstance(reason, (TimeoutError, socket.timeout)):
-                raise AdapterError("HTTP_TIMEOUT", "request timed out", path) from exc
-            raise AdapterError("HTTP_ERROR", str(reason), path) from exc
+                raise AdapterError(
+                    "HTTP_TIMEOUT",
+                    "request timed out",
+                    path,
+                ) from exc
+            raise AdapterError(
+                "HTTP_ERROR",
+                str(reason),
+                path,
+            ) from exc
         except (TimeoutError, socket.timeout) as exc:
-            raise AdapterError("HTTP_TIMEOUT", "request timed out", path) from exc
+            raise AdapterError(
+                "HTTP_TIMEOUT",
+                "request timed out",
+                path,
+            ) from exc
         with response:
             if response.geturl() != url:
-                raise AdapterError("HTTP_REDIRECT", "redirected response is forbidden", path)
+                raise AdapterError(
+                    "HTTP_REDIRECT",
+                    "redirected response is forbidden",
+                    path,
+                )
             status = getattr(response, "status", 200)
             if status != 200:
-                raise AdapterError("HTTP_STATUS", f"HTTP {status}", path)
+                raise AdapterError(
+                    "HTTP_STATUS",
+                    f"HTTP {status}",
+                    path,
+                )
             content_type = response.headers.get_content_type().lower()
             if content_type != "application/json":
                 raise AdapterError(
@@ -162,7 +262,11 @@ class ComfyUIPreflightHttpClient:
                 try:
                     declared = int(raw_length)
                 except ValueError as exc:
-                    raise AdapterError("HTTP_LENGTH", "invalid Content-Length", path) from exc
+                    raise AdapterError(
+                        "HTTP_LENGTH",
+                        "invalid Content-Length",
+                        path,
+                    ) from exc
                 if declared < 0 or declared > maximum:
                     raise AdapterError(
                         "HTTP_RESPONSE_TOO_LARGE",
