@@ -8,6 +8,11 @@ import tempfile
 import unittest
 import zlib
 
+from ai_illustration.quality import (
+    CREATIVE_CANDIDATE,
+    TECHNICAL_CANDIDATE,
+    TRANSPORT_SMOKE_OUTPUT,
+)
 from ai_illustration.variants import VariantError, plan_variant_set, validate_variant_set
 
 
@@ -55,7 +60,7 @@ class VariantTests(unittest.TestCase):
             "character_ref": "boke@v001", "style_ref": "rough-flat@v001",
             "pose": "neutral", "expression": "neutral", "crop": "full", "facing": "front",
             "tool_id": "fixture-tool", "model_id": "fixture-model",
-            "license_status": "approved", "config": {}, "output_intent": "evaluation",
+            "license_status": "approved", "config": {}, "output_intent": "candidate",
             "provenance": {"source": "fixture"},
         })
         _write(self.root, "candidate.json", {
@@ -63,6 +68,7 @@ class VariantTests(unittest.TestCase):
             "request_ref": "request-demo", "path": "candidate.png", "sha256": self.sha,
             "width": 1, "height": 1, "color_space": "sRGB", "has_alpha": True,
             "media_type": "image/png", "status": "technically_valid",
+            "quality_stage": TECHNICAL_CANDIDATE,
             "provenance": {"source": "fixture"},
         })
         _write(self.root, "review.json", {
@@ -70,6 +76,8 @@ class VariantTests(unittest.TestCase):
             "candidate_ref": "candidate-demo", "candidate_request_ref": "request-demo",
             "candidate_sha256": self.sha, "decision": "accept", "reviewer": "owner",
             "timestamp": "2026-08-02T00:00:00Z", "categories": [],
+            "review_scope": "creative", "resulting_quality_stage": CREATIVE_CANDIDATE,
+            "hard_fail_categories": [],
         })
         self.matrix = {
             "combinations": [
@@ -80,6 +88,9 @@ class VariantTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
+
+    def read_json(self, name: str) -> dict[str, object]:
+        return json.loads((self.root / name).read_text(encoding="utf-8"))
 
     def test_deterministic_and_shuffled_input(self) -> None:
         first = plan_variant_set(self.root, "candidate-demo", self.matrix, "evaluation")
@@ -99,7 +110,7 @@ class VariantTests(unittest.TestCase):
             plan_variant_set(self.root, "candidate-demo", {"combinations": [item, item]}, "evaluation")
 
     def test_stale_review_checksum_fails_closed(self) -> None:
-        review = json.loads((self.root / "review.json").read_text(encoding="utf-8"))
+        review = self.read_json("review.json")
         review["candidate_sha256"] = "b" * 64
         _write(self.root, "review.json", review)
         with self.assertRaisesRegex(VariantError, "STALE_REVIEW"):
@@ -114,7 +125,7 @@ class VariantTests(unittest.TestCase):
             plan_variant_set(self.root, "candidate-demo", self.matrix, "evaluation")
 
     def test_evaluation_does_not_imply_commercial_approval(self) -> None:
-        request = json.loads((self.root / "request.json").read_text(encoding="utf-8"))
+        request = self.read_json("request.json")
         request["license_status"] = "reviewing"
         _write(self.root, "request.json", request)
         self.assertEqual(plan_variant_set(self.root, "candidate-demo", self.matrix, "evaluation")["intent"], "evaluation")
@@ -130,8 +141,45 @@ class VariantTests(unittest.TestCase):
             "candidate_ref": "candidate-demo", "candidate_request_ref": "request-demo",
             "candidate_sha256": self.sha, "decision": "reject", "reviewer": "owner",
             "timestamp": "2026-08-03T00:00:00Z", "categories": [],
+            "review_scope": "creative", "resulting_quality_stage": TECHNICAL_CANDIDATE,
+            "hard_fail_categories": ["identity_drift"],
         })
         with self.assertRaisesRegex(VariantError, "ACCEPT_REVIEW_REQUIRED"):
+            plan_variant_set(self.root, "candidate-demo", self.matrix, "evaluation")
+
+    def test_legacy_accept_cannot_unlock_variant_planning(self) -> None:
+        review = self.read_json("review.json")
+        for field in ("review_scope", "resulting_quality_stage", "hard_fail_categories"):
+            review.pop(field)
+        _write(self.root, "review.json", review)
+        with self.assertRaisesRegex(VariantError, "CREATIVE_REVIEW_REQUIRED"):
+            plan_variant_set(self.root, "candidate-demo", self.matrix, "evaluation")
+
+    def test_smoke_and_missing_candidate_stage_cannot_unlock_variants(self) -> None:
+        candidate = self.read_json("candidate.json")
+        candidate["quality_stage"] = TRANSPORT_SMOKE_OUTPUT
+        _write(self.root, "candidate.json", candidate)
+        with self.assertRaisesRegex(VariantError, "SMOKE_OUTPUT_FORBIDDEN"):
+            plan_variant_set(self.root, "candidate-demo", self.matrix, "evaluation")
+
+        candidate.pop("quality_stage")
+        _write(self.root, "candidate.json", candidate)
+        with self.assertRaisesRegex(VariantError, "CREATIVE_GATE_REQUIRED"):
+            plan_variant_set(self.root, "candidate-demo", self.matrix, "evaluation")
+
+    def test_technical_accept_cannot_unlock_variant_planning(self) -> None:
+        review = self.read_json("review.json")
+        review["review_scope"] = "technical"
+        review["resulting_quality_stage"] = TECHNICAL_CANDIDATE
+        _write(self.root, "review.json", review)
+        with self.assertRaisesRegex(VariantError, "CREATIVE_REVIEW_REQUIRED"):
+            plan_variant_set(self.root, "candidate-demo", self.matrix, "evaluation")
+
+    def test_creative_accept_with_hard_fail_is_rejected_before_planning(self) -> None:
+        review = self.read_json("review.json")
+        review["hard_fail_categories"] = ["identity_drift"]
+        _write(self.root, "review.json", review)
+        with self.assertRaisesRegex(VariantError, "CREATIVE_HARD_FAIL"):
             plan_variant_set(self.root, "candidate-demo", self.matrix, "evaluation")
 
     def test_output_has_no_remote_or_execution_fields(self) -> None:
