@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any
 
 TRANSPORT_SMOKE_INTENT = "transport-smoke"
@@ -13,6 +14,7 @@ CREATIVE_CANDIDATE = "creative_candidate"
 PACKAGED_QUALITY_STAGES = {TRANSPORT_SMOKE_OUTPUT, TECHNICAL_CANDIDATE}
 QUALITY_STAGES = {*PACKAGED_QUALITY_STAGES, CREATIVE_CANDIDATE}
 REVIEW_SCOPES = {"technical", "creative"}
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 HARD_FAIL_CATEGORIES = (
     "malformed_or_missing_limb",
     "broken_joint_or_torso",
@@ -105,6 +107,13 @@ def require_creative_candidate(
             "quality_stage",
         )
 
+    candidate_sha256 = candidate.get("sha256")
+    if not isinstance(candidate_sha256, str) or not SHA256_RE.fullmatch(candidate_sha256):
+        raise QualityGateError(
+            "CHECKSUM",
+            "source candidate must carry a valid lowercase SHA-256",
+            "sha256",
+        )
     if candidate.get("request_ref") != request_id:
         raise QualityGateError(
             "STALE_REVIEW",
@@ -129,7 +138,7 @@ def require_creative_candidate(
             "review source request does not match the candidate",
             "candidate_request_ref",
         )
-    if review.get("candidate_sha256") != candidate.get("sha256"):
+    if review.get("candidate_sha256") != candidate_sha256:
         raise QualityGateError(
             "STALE_REVIEW",
             "review checksum does not match the candidate",
@@ -140,6 +149,13 @@ def require_creative_candidate(
             "ACCEPT_REVIEW_REQUIRED",
             "latest review decision must be accept",
             "decision",
+        )
+    reviewer = review.get("reviewer")
+    if not isinstance(reviewer, str) or not reviewer.strip():
+        raise QualityGateError(
+            "REVIEWER_REQUIRED",
+            "an explicit reviewer identity is required",
+            "reviewer",
         )
     if review.get("review_scope") != "creative":
         raise QualityGateError(
