@@ -10,6 +10,12 @@ import unittest
 import zlib
 
 from ai_illustration.models import Manifest
+from ai_illustration.quality import (
+    CREATIVE_CANDIDATE,
+    HARD_FAIL_CATEGORIES,
+    TECHNICAL_CANDIDATE,
+    TRANSPORT_SMOKE_OUTPUT,
+)
 from ai_illustration.review_ui import (
     REVIEW_CATEGORIES,
     ReviewUIError,
@@ -47,7 +53,12 @@ class ReviewUITest(unittest.TestCase):
     def write_json(self, name: str, value: dict[str, object]) -> None:
         (self.manifests / name).write_text(json.dumps(value), encoding="utf-8")
 
-    def seed(self, *, with_image: bool = False) -> bytes | None:
+    def seed(
+        self,
+        *,
+        with_image: bool = False,
+        quality_stage: str | None = TECHNICAL_CANDIDATE,
+    ) -> bytes | None:
         self.write_json("character.json", {
             "kind": "character-spec", "schema_version": "1.0", "id": "boke",
             "version": "v001", "role": "boke", "review_status": "approved",
@@ -59,20 +70,23 @@ class ReviewUITest(unittest.TestCase):
             "pose": "standing-neutral", "expression": "neutral", "crop": "full",
             "facing": "front", "tool_id": "fixture-tool", "model_id": "fixture-model",
             "license_status": "approved", "config": {"steps": 1},
-            "output_intent": "review", "provenance": {"source": "synthetic-fixture"},
+            "output_intent": "candidate", "provenance": {"source": "synthetic-fixture"},
         })
         payload = _png() if with_image else None
         checksum = hashlib.sha256(payload).hexdigest() if payload else "a" * 64
         if payload:
             (self.assets / "candidate-demo.png").write_bytes(payload)
-        self.write_json("candidate.json", {
+        candidate: dict[str, object] = {
             "kind": "candidate-asset", "schema_version": "1.0", "id": "candidate-demo",
             "request_ref": "request-demo", "path": "candidate-demo.png", "sha256": checksum,
             "width": 1 if payload else 2048, "height": 1 if payload else 2048,
             "color_space": "sRGB", "has_alpha": True, "media_type": "image/png",
             "status": "technically_valid" if payload else "received",
             "provenance": {"source": "synthetic-fixture"},
-        })
+        }
+        if quality_stage is not None:
+            candidate["quality_stage"] = quality_stage
+        self.write_json("candidate.json", candidate)
         return payload
 
     def test_missing_image_becomes_metadata_placeholder(self) -> None:
@@ -80,6 +94,7 @@ class ReviewUITest(unittest.TestCase):
         data = load_review_data(self.manifests, self.assets)
         self.assertEqual([item.payload["id"] for item in data.candidates], ["candidate-demo"])
         self.assertFalse(data.candidates[0].payload["image_available"])
+        self.assertEqual(data.candidates[0].payload["quality_stage"], TECHNICAL_CANDIDATE)
         self.assertIsNone(data.candidates[0].read_verified_asset())
 
     def test_verified_png_is_available(self) -> None:
@@ -109,15 +124,21 @@ class ReviewUITest(unittest.TestCase):
         with self.assertRaisesRegex(ReviewUIError, "symlinked manifest"):
             load_review_data(self.manifests, self.assets)
 
-    def test_review_export_is_existing_schema_valid(self) -> None:
+    def test_review_export_is_quality_schema_valid(self) -> None:
         self.seed()
         candidate = load_review_data(self.manifests, self.assets).candidates[0].payload
         review = make_review_decision(
-            candidate, decision="needs_revision", reviewer="owner",
+            candidate,
+            decision="needs_revision",
+            reviewer="owner",
             categories=["generic_eyes", "line_uniformity", "generic_eyes"],
-            notes="retain silhouette", timestamp="2026-08-02T11:00:00Z",
+            notes="retain silhouette",
+            timestamp="2026-08-02T11:00:00Z",
         )
         self.assertEqual(review["categories"], ["generic_eyes", "line_uniformity"])
+        self.assertEqual(review["review_scope"], "technical")
+        self.assertEqual(review["resulting_quality_stage"], TECHNICAL_CANDIDATE)
+        self.assertEqual(review["hard_fail_categories"], [])
         self.assertEqual(validate_document(Manifest(Path("review.json"), review)), [])
 
     def test_approval_requires_live_candidate_view_and_current_bytes(self) -> None:
@@ -149,6 +170,7 @@ class ReviewUITest(unittest.TestCase):
             timestamp="2026-08-02T11:00:02Z",
         )
         self.assertEqual(accepted["decision"], "accept")
+        self.assertEqual(accepted["resulting_quality_stage"], TECHNICAL_CANDIDATE)
 
         (self.assets / "candidate-demo.png").write_bytes(_png(99))
         with self.assertRaisesRegex(ReviewUIError, "live verified image"):
@@ -162,6 +184,82 @@ class ReviewUITest(unittest.TestCase):
                 verified_view, decision="accept", reviewer="owner", categories=[],
                 timestamp="2026-08-02T11:00:04Z",
             )
+
+    def test_creative_accept_requires_live_technical_candidate_and_no_hard_fail(self) -> None:
+        self.seed(with_image=True)
+        view = load_review_data(self.manifests, self.assets).candidates[0]
+        accepted = make_review_decision(
+            view,
+            decision="accept",
+            reviewer="owner",
+            categories=[],
+            review_scope="creative",
+            hard_fail_categories=[],
+            timestamp="2026-08-02T12:00:00Z",
+        )
+        self.assertEqual(accepted["resulting_quality_stage"], CREATIVE_CANDIDATE)
+        self.assertEqual(validate_document(Manifest(Path("review.json"), accepted)), [])
+        with self.assertRaisesRegex(ReviewUIError, "hard-fail"):
+            make_review_decision(
+                view,
+                decision="accept",
+                reviewer="owner",
+                categories=[],
+                review_scope="creative",
+                hard_fail_categories=["identity_drift"],
+                timestamp="2026-08-02T12:00:01Z",
+            )
+
+        candidate_path = self.manifests / "candidate.json"
+        candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+        candidate["quality_stage"] = TRANSPORT_SMOKE_OUTPUT
+        candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+        smoke_view = load_review_data(self.manifests, self.assets).candidates[0]
+        with self.assertRaisesRegex(ReviewUIError, "technical_candidate"):
+            make_review_decision(
+                smoke_view,
+                decision="reject",
+                reviewer="owner",
+                categories=[],
+                review_scope="creative",
+                timestamp="2026-08-02T12:00:02Z",
+            )
+
+        candidate.pop("quality_stage")
+        candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+        legacy_view = load_review_data(self.manifests, self.assets).candidates[0]
+        with self.assertRaisesRegex(ReviewUIError, "packaged quality_stage"):
+            make_review_decision(
+                legacy_view,
+                decision="accept",
+                reviewer="owner",
+                categories=[],
+                review_scope="creative",
+                timestamp="2026-08-02T12:00:03Z",
+            )
+
+    def test_technical_review_never_promotes_and_id_binds_quality_semantics(self) -> None:
+        self.seed(with_image=True)
+        view = load_review_data(self.manifests, self.assets).candidates[0]
+        technical = make_review_decision(
+            view,
+            decision="accept",
+            reviewer="owner",
+            categories=[],
+            review_scope="technical",
+            timestamp="2026-08-02T13:00:00Z",
+        )
+        creative = make_review_decision(
+            view,
+            decision="accept",
+            reviewer="owner",
+            categories=[],
+            review_scope="creative",
+            timestamp="2026-08-02T13:00:00Z",
+        )
+        self.assertEqual(technical["resulting_quality_stage"], TECHNICAL_CANDIDATE)
+        self.assertEqual(creative["resulting_quality_stage"], CREATIVE_CANDIDATE)
+        self.assertNotEqual(technical["id"], creative["id"])
 
     def test_imported_review_must_bind_current_request_and_checksum(self) -> None:
         self.seed()
@@ -180,12 +278,43 @@ class ReviewUITest(unittest.TestCase):
         with self.assertRaisesRegex(ReviewUIError, "candidate checksum"):
             load_review_data(self.manifests, self.assets)
 
-    def test_review_rejects_unknown_category(self) -> None:
+    def test_imported_creative_claim_is_revalidated(self) -> None:
+        payload = self.seed(with_image=True)
+        checksum = hashlib.sha256(payload).hexdigest()
+        review = {
+            "kind": "review-decision", "schema_version": "1.0", "id": "review-creative",
+            "candidate_ref": "candidate-demo", "candidate_request_ref": "request-demo",
+            "candidate_sha256": checksum, "decision": "accept", "reviewer": "owner",
+            "timestamp": "2026-08-02T14:00:00Z", "categories": [],
+            "review_scope": "creative", "resulting_quality_stage": CREATIVE_CANDIDATE,
+            "hard_fail_categories": [],
+        }
+        self.write_json("review.json", review)
+        data = load_review_data(self.manifests, self.assets)
+        self.assertEqual(data.candidates[0].payload["review_resulting_quality_stage"], CREATIVE_CANDIDATE)
+
+        candidate_path = self.manifests / "candidate.json"
+        candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+        candidate["quality_stage"] = TRANSPORT_SMOKE_OUTPUT
+        candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+        with self.assertRaisesRegex(ReviewUIError, "non-technical candidate"):
+            load_review_data(self.manifests, self.assets)
+
+    def test_review_rejects_unknown_category_and_hard_fail(self) -> None:
         self.seed(with_image=True)
         candidate = load_review_data(self.manifests, self.assets).candidates[0]
         with self.assertRaises(ReviewUIError):
             make_review_decision(candidate, decision="accept", reviewer="owner", categories=["invented"])
+        with self.assertRaisesRegex(ReviewUIError, "HARD_FAIL_CATEGORIES"):
+            make_review_decision(
+                candidate,
+                decision="reject",
+                reviewer="owner",
+                categories=[],
+                hard_fail_categories=["invented"],
+            )
         self.assertIn("identity_drift", REVIEW_CATEGORIES)
+        self.assertIn("identity_drift", HARD_FAIL_CATEGORIES)
 
     def test_path_traversal_and_symlink_escape_are_rejected(self) -> None:
         (self.assets / "ok.png").write_bytes(b"x")
@@ -221,6 +350,10 @@ class ReviewUITest(unittest.TestCase):
             self.assertEqual(response.getheader("X-Content-Type-Options"), "nosniff")
             self.assertIn("default-src 'self'", response.getheader("Content-Security-Policy"))
             self.assertEqual(parsed["candidates"][0]["id"], "candidate-demo")
+            self.assertEqual(parsed["candidates"][0]["technical_status"], "received")
+            self.assertEqual(parsed["candidates"][0]["quality_stage"], TECHNICAL_CANDIDATE)
+            self.assertEqual(parsed["review_scopes"], ["creative", "technical"])
+            self.assertEqual(set(parsed["hard_fail_categories"]), set(HARD_FAIL_CATEGORIES))
             connection.request("GET", "/app.js")
             script = connection.getresponse()
             script_body = script.read()
