@@ -13,6 +13,7 @@ from .adapters.comfyui_execution_common import validate_catalog_profile, validat
 from .adapters.comfyui_execution_plan import prepare_execution
 from .models import Manifest
 from .naming import content_identifier, safe_relative_path
+from .quality import TRANSPORT_SMOKE_INTENT
 from .validation import validate_document
 from .comfyui_smoke_common import (
     BINDINGS_FILE, DATE_RE, EXECUTION_FILE, MANIFEST_FILE, MODEL_FILE, PROFILE_STATES,
@@ -139,7 +140,7 @@ def _bundle_objects(
         "seed": values["seed"],
         "license_status": profile_state,
         "config": config,
-        "output_intent": "evaluation",
+        "output_intent": TRANSPORT_SMOKE_INTENT,
         "provenance": {"source": "owner-supplied-comfyui-api-workflow"},
     }
     capabilities = ["seed", "workflow"]
