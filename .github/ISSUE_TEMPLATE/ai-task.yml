@@ -1,23 +1,55 @@
 name: AI implementation task
-description: One bounded implementation request
+description: One bounded GitHub-only implementation request
 title: "[Task] "
 body:
+  - type: markdown
+    attributes:
+      value: GitHub-direct implementation and exact-head GitHub coordinator review are the default. Codex and Claude are optional helpers only.
+  - type: checkboxes
+    id: startup_acceptance
+    attributes:
+      label: Repository startup acceptance
+      options:
+        - label: GitHub Actions and Foundation workflows enabled; connected GitHub access, Workflow permissions, and harmless Bootstrap acceptance are complete.
+          required: true
+        - label: Read and write permissions is selected and Allow GitHub Actions to create and approve pull requests is enabled.
+          required: true
+  - type: textarea
+    id: startup_evidence
+    attributes:
+      label: Non-secret Phase 0 evidence reference
+      description: Provide acceptance Issue/PR, exact head SHA, successful checks, and coordinator review. Do not provide credential values or Secret values.
+    validations:
+      required: true
   - type: textarea
     id: goal
     attributes:
       label: Goal
     validations:
       required: true
-  - type: textarea
-    id: acceptance
+  - type: dropdown
+    id: risk_tier
     attributes:
-      label: Acceptance criteria
+      label: Risk tier
+      options: [low, standard, protected]
     validations:
       required: true
   - type: textarea
     id: scope
     attributes:
       label: Allowed paths
+      placeholder: |
+        - scripts/example.py
+        - tests/**
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Required checks
+      value: |
+        - CI
+        - Unit Tests
     validations:
       required: true
   - type: textarea
@@ -27,8 +59,22 @@ body:
     validations:
       required: true
   - type: textarea
-    id: validation
+    id: rollback
     attributes:
-      label: Required validation
+      label: Rollback
+      value: Revert the eventual merge commit; never force-rewrite shared history.
     validations:
       required: true
+  - type: textarea
+    id: protected_authorization
+    attributes:
+      label: Protected authorization when applicable
+      description: Include a foundation-protected-authorization block with category, paths, operation, prohibited, validation, and rollback.
+      render: markdown
+  - type: checkboxes
+    id: optional_provider
+    attributes:
+      label: Optional provider route
+      options:
+        - label: I explicitly request an optional provider helper. Provider unavailability must remain non-blocking.
+          required: false

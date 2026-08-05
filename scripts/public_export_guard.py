@@ -2,6 +2,7 @@
 """Fail closed when a public export contains secrets or private references."""
 from __future__ import annotations
 import argparse
+import json
 import re
 from pathlib import Path
 
@@ -10,6 +11,7 @@ TEXT_SUFFIXES = {
     ".gitignore", ".cfg", ".ini",
 }
 SKIP_PARTS = {".git", "__pycache__", ".pytest_cache"}
+GENERATED_TARGET_MARKER = "<!-- ai-dev-automation-foundation:generated-target -->"
 PATTERNS = {
     "private-repository-reference": re.compile(r"ai-dev-automation-(?:sandbox|e2e)(?!-foundation)", re.I),
     "private-notion-reference": re.compile(r"(?:notion\.so|app\.notion\.com)/(?:p/)?[0-9a-f]{20,}", re.I),
@@ -33,14 +35,43 @@ def iter_text_files(root: Path):
         if path.suffix.lower() in TEXT_SUFFIXES or path.name in {"LICENSE", ".gitignore"}:
             yield path
 
+def is_generated_target(root: Path) -> bool:
+    checklist = root / "INSTALL_CHECKLIST.md"
+    lock_path = root / "FOUNDATION.lock.json"
+    source_generator = root / "bootstrap/generator.py"
+    if (
+        checklist.is_symlink()
+        or not checklist.is_file()
+        or lock_path.is_symlink()
+        or not lock_path.is_file()
+        or source_generator.exists()
+    ):
+        return False
+    if GENERATED_TARGET_MARKER not in checklist.read_text(encoding="utf-8"):
+        return False
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(lock, dict)
+        and lock.get("schema_version") == 1
+        and lock.get("source_repository") == "shiroku46/ai-dev-automation-foundation"
+        and re.fullmatch(r"[0-9a-f]{40}", str(lock.get("source_sha") or "")) is not None
+        and isinstance(lock.get("managed_files"), list)
+    )
+
 def scan(root: Path) -> list[str]:
     findings: list[str] = []
+    generated_target = is_generated_target(root)
     for path in iter_text_files(root):
         text = path.read_text(encoding="utf-8")
         cleaned = text
         for allowed in ALLOWED_SECRET_REFERENCES:
             cleaned = cleaned.replace(allowed, "")
         for name, pattern in PATTERNS.items():
+            if generated_target and name == "product-specific":
+                continue
             for match in pattern.finditer(cleaned):
                 line = cleaned.count("\n", 0, match.start()) + 1
                 findings.append(f"{path.relative_to(root)}:{line}: {name}")

@@ -7,86 +7,1069 @@ on:
   schedule:
     - cron: "17 * * * *"
   workflow_dispatch:
-
-concurrency:
-  group: trusted-ci-reconcile
-  cancel-in-progress: false
+  issue_comment:
+    types: [created]
 
 permissions: {}
 
-jobs:
-  discover:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.name != 'Claude Issue Queue'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      actions: read
-      checks: read
-      contents: read
-      pull-requests: read
-    outputs:
-      matrix: ${{ steps.discover.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          persist-credentials: false
-      - name: Discover bounded exact-SHA candidates without valid or active attestations
-        id: discover
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          AUTOMATION_OWNER: ${{ vars.AUTOMATION_OWNER || github.repository_owner }}
-        run: |
-          matrix=$(python -m scripts.supervisor_runtime discover)
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+concurrency:
+  group: trusted-ci-reconciliation
+  cancel-in-progress: false
 
-  dispatch:
-    needs: discover
-    if: needs.discover.outputs.matrix != '[]'
-    strategy:
-      fail-fast: false
-      max-parallel: 2
-      matrix:
-        target_sha: ${{ fromJSON(needs.discover.outputs.matrix) }}
+jobs:
+  observe:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.path != '.github/workflows/claude-queue.yml'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      actions: write
+      actions: read
       contents: read
+      pull-requests: read
     steps:
-      - name: Dispatch only the fixed trusted workflow on the default branch
+      - name: Record read-only native evidence observation
         env:
-          GH_TOKEN: ${{ github.token }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          TARGET_SHA: ${{ matrix.target_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          WORKFLOW_HEAD: ${{ github.event.workflow_run.head_sha }}
+          WORKFLOW_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
-          set -euo pipefail
-          printf '%s' "$TARGET_SHA" | grep -Eq '^[0-9a-f]{40}$'
-          gh workflow run trusted-checks.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref "$DEFAULT_BRANCH" \
-            -f "target_sha=$TARGET_SHA"
+          {
+            echo "## Trusted CI reconciliation"
+            echo
+            echo "- mode: read-only compatibility observation"
+            echo "- event: \`$EVENT_NAME\`"
+            echo "- workflow: \`${WORKFLOW_NAME:-manual}\`"
+            echo "- exact_head: \`${WORKFLOW_HEAD:-none}\`"
+            echo "- conclusion: \`${WORKFLOW_CONCLUSION:-none}\`"
+            echo "- provider_invocation: false"
+            echo "- human_action_required: false"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   queue_recovery:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.name == 'Claude Issue Queue'
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/claude-queue.yml') ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.comment.body == '/foundation-reconcile' &&
+       github.actor == github.repository_owner &&
+       github.event.issue.pull_request == null)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       actions: write
       contents: write
       issues: read
-      pull-requests: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ github.event.repository.default_branch }}
-          persist-credentials: false
-      - name: Reconcile bounded Queue retries through fixed default-branch code
+          fetch-depth: 0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+      - name: Consume verified checkpoints or dispatch one bounded retry
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          AUTOMATION_OWNER: ${{ vars.AUTOMATION_OWNER || github.repository_owner }}
-        run: python -m scripts.supervisor_queue_recovery_v3
+          OWNER: ${{ vars.AUTOMATION_OWNER || github.repository_owner }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          ACTOR: ${{ github.actor }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PATH: ${{ github.event_path }}
+        run: |
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import base64
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import stat
+          import subprocess
+          import tempfile
+          import time
+          import urllib.parse
+          import zipfile
+          from typing import Any
+
+          from scripts import supervisor_policy as policy
+          from scripts.queue_failure_classifier import (
+              FailureClass,
+              build_failure_status,
+              classify_conclusion,
+              should_auto_retry,
+          )
+          from scripts.queue_issue_hydration import resolve_stable_issue
+          from scripts.queue_retry_identity import (
+              exact_retry_runs,
+              is_active_ignored_run,
+              is_active_queue_run,
+              parse_queue_run_title,
+              retry_run_title,
+              stranded_retry_attempt,
+              validate_retry_records,
+          )
+
+          repository = os.environ["REPOSITORY"]
+          default_branch = os.environ["DEFAULT_BRANCH"]
+          configured_owner = os.environ["OWNER"].strip().casefold()
+          repository_owner = os.environ["REPOSITORY_OWNER"].strip().casefold()
+          trusted_owners = {value for value in (configured_owner, repository_owner) if value}
+          event_actor = os.environ["ACTOR"].strip().casefold()
+          control_trigger = "/foundation-reconcile"
+          event_name = os.environ["EVENT_NAME"]
+          event = json.loads(pathlib.Path(os.environ["EVENT_PATH"]).read_text(encoding="utf-8"))
+          exact_sha = re.compile(r"^[0-9a-f]{40}$")
+          queue_workflow = "claude-queue.yml"
+          stop_branch = "automation-internal-stops"
+          retry_root = "automation-stops/queue-v4"
+          max_retries = 3
+
+          def gh_bytes(*args: str, check: bool = True) -> bytes:
+              result = subprocess.run(["gh", *args], capture_output=True, check=False)
+              if check and result.returncode != 0:
+                  raise RuntimeError(result.stderr.decode("utf-8", errors="replace").strip())
+              return result.stdout
+
+          def gh(*args: str, check: bool = True) -> str:
+              return gh_bytes(*args, check=check).decode("utf-8")
+
+          def api(path: str) -> Any:
+              return json.loads(gh("api", "-H", "Accept: application/vnd.github+json", path))
+
+          def typed_api(method: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+              completed = subprocess.run(
+                  [
+                      "gh", "api", "--method", method,
+                      "-H", "Accept: application/vnd.github+json",
+                      path, "--input", "-",
+                  ],
+                  input=json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                  text=True,
+                  capture_output=True,
+                  check=False,
+              )
+              if completed.returncode != 0:
+                  raise RuntimeError("sanitized Git Data request failed")
+              try:
+                  value = json.loads(completed.stdout or "{}")
+              except json.JSONDecodeError as exc:
+                  raise RuntimeError("sanitized Git Data response was malformed") from exc
+              if not isinstance(value, dict):
+                  raise RuntimeError("sanitized Git Data response was not an object")
+              return value
+
+          def api_pages(path: str, key: str | None = None) -> list[dict[str, Any]]:
+              payload = json.loads(gh("api", "-H", "Accept: application/vnd.github+json", "--paginate", "--slurp", path))
+              values: list[dict[str, Any]] = []
+              for page in payload:
+                  items = page if key is None else page.get(key, [])
+                  if not isinstance(items, list):
+                      raise RuntimeError("paginated GitHub evidence is incomplete")
+                  values.extend(items)
+              return values
+
+          def current_default_sha() -> str:
+              sha = str(api(f"repos/{repository}/commits/{default_branch}").get("sha") or "")
+              if not exact_sha.fullmatch(sha):
+                  raise RuntimeError("default branch did not resolve exactly")
+              return sha
+
+          def fresh_issue(number: int) -> dict[str, Any]:
+              completed = subprocess.run(
+                  [
+                      "gh", "api",
+                      "-H", "Accept: application/vnd.github+json",
+                      "-H", "Cache-Control: no-cache",
+                      "-H", "Pragma: no-cache",
+                      f"repos/{repository}/issues/{number}",
+                  ],
+                  text=True,
+                  capture_output=True,
+                  check=False,
+              )
+              if completed.returncode != 0:
+                  raise RuntimeError("connected Issue read failed")
+              try:
+                  value = json.loads(completed.stdout)
+              except json.JSONDecodeError as exc:
+                  raise RuntimeError("connected Issue response was malformed") from exc
+              if not isinstance(value, dict):
+                  raise RuntimeError("connected Issue response was not an object")
+              return value
+
+          def trusted_issue(number: int) -> dict[str, Any]:
+              if isinstance(number, bool) or not isinstance(number, int) or number <= 0:
+                  raise RuntimeError("Queue source Issue trust predicates failed: invalid_number=true")
+              delays = (0.0, 0.5, 1.0, 2.0)
+              samples: list[dict[str, Any]] = []
+              last = {
+                  "exact_number": False,
+                  "open_state": False,
+                  "issue_not_pr": False,
+                  "trusted_author": False,
+              }
+              stability = "unstable"
+              for delay in delays:
+                  if delay:
+                      time.sleep(delay)
+                  try:
+                      issue = fresh_issue(number)
+                  except RuntimeError:
+                      continue
+                  samples.append(issue)
+                  stability, trusted, last = resolve_stable_issue(
+                      samples,
+                      number=number,
+                      allowed_owners=trusted_owners,
+                      required_matches=2,
+                  )
+                  if stability == "trusted" and trusted is not None:
+                      return trusted
+              detail = ",".join(
+                  f"{key}={str(value).lower()}" for key, value in sorted(last.items())
+              )
+              raise RuntimeError(
+                  f"Queue source Issue trust predicates failed: stability={stability},{detail}"
+              )
+
+          def trigger_identity(issue: dict[str, Any]) -> dict[str, Any] | None:
+              body = re.sub(r"<!--.*?-->", "", str(issue.get("body") or ""), flags=re.S)
+              first = next((line.strip() for line in body.splitlines() if line.strip()), "")
+              if first == "/claude-run":
+                  return {
+                      "kind": "issue-body",
+                      "id": int(issue.get("number") or 0),
+                      "created_at": str(issue.get("created_at") or ""),
+                  }
+              number = int(issue.get("number") or 0)
+              comments = api_pages(f"repos/{repository}/issues/{number}/comments?per_page=100")
+              matches = [
+                  item for item in comments
+                  if str(((item.get("user") or {}).get("login") or "")).strip().casefold() in trusted_owners
+                  and str(item.get("body") or "").strip() == "/claude-run"
+              ]
+              if not matches:
+                  return None
+              selected = max(matches, key=lambda item: (str(item.get("created_at") or ""), int(item.get("id") or 0)))
+              return {
+                  "kind": "issue-comment",
+                  "id": int(selected.get("id") or 0),
+                  "created_at": str(selected.get("created_at") or ""),
+                  "updated_at": str(selected.get("updated_at") or ""),
+              }
+
+          def request_fingerprint(issue: dict[str, Any], base_sha: str) -> str:
+              trigger = trigger_identity(issue)
+              if trigger is None or not trigger.get("id") or not trigger.get("created_at"):
+                  raise RuntimeError("Queue trigger identity is missing")
+              payload = {
+                  "base_sha": base_sha,
+                  "issue_body": str(issue.get("body") or ""),
+                  "issue_number": int(issue["number"]),
+                  "issue_title": str(issue.get("title") or ""),
+                  "trigger": trigger,
+              }
+              raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+              return hashlib.sha256(raw).hexdigest()[:20]
+
+          def queue_runs() -> list[dict[str, Any]]:
+              return api_pages(
+                  f"repos/{repository}/actions/workflows/{queue_workflow}/runs?per_page=100",
+                  "workflow_runs",
+              )
+
+          def active_queue_run() -> bool:
+              return any(
+                  is_active_queue_run(run)
+                  and run.get("head_branch") == default_branch
+                  and ((run.get("repository") or {}).get("full_name") or repository) == repository
+                  for run in queue_runs()
+              )
+
+          def wait_for_control_noop(issue_number: int) -> bool:
+              for delay in (0.0, 1.0, 2.0, 3.0, 4.0):
+                  if delay:
+                      time.sleep(delay)
+                  active = any(
+                      is_active_ignored_run(run, issue_number)
+                      and run.get("head_branch") == default_branch
+                      and ((run.get("repository") or {}).get("full_name") or repository) == repository
+                      for run in queue_runs()
+                  )
+                  if not active:
+                      return True
+              return False
+
+          def exact_retry_run(
+              issue_number: int,
+              attempt: int,
+              fingerprint: str,
+              base_sha: str,
+              runs: list[dict[str, Any]] | None = None,
+          ) -> dict[str, Any] | None:
+              matches = exact_retry_runs(
+                  queue_runs() if runs is None else runs,
+                  repository=repository,
+                  default_branch=default_branch,
+                  base_sha=base_sha,
+                  issue_number=issue_number,
+                  attempt=attempt,
+                  fingerprint=fingerprint,
+              )
+              return dict(matches[0]) if matches else None
+
+          def confirm_retry_run(
+              issue_number: int,
+              attempt: int,
+              fingerprint: str,
+              base_sha: str,
+          ) -> dict[str, Any]:
+              for delay in (0.0, 0.5, 1.0, 2.0, 4.0):
+                  if delay:
+                      time.sleep(delay)
+                  run = exact_retry_run(issue_number, attempt, fingerprint, base_sha)
+                  if run is not None:
+                      return run
+              raise RuntimeError("exact Queue retry run was not connected after dispatch")
+
+          def open_pulls() -> list[dict[str, Any]]:
+              return api_pages(f"repos/{repository}/pulls?state=open&per_page=100")
+
+          def candidate_for_issue(issue_number: int) -> list[dict[str, Any]]:
+              prefixes = (
+                  f"claude-issue-{issue_number}-",
+                  f"automation/queue-issue-{issue_number}-",
+                  f"automation/issue-{issue_number}-",
+              )
+              matches = []
+              for pull in open_pulls():
+                  head = pull.get("head") or {}
+                  if ((head.get("repo") or {}).get("full_name") != repository):
+                      continue
+                  body = str(pull.get("body") or "")
+                  linked = bool(re.search(rf"(?im)\b(?:closes|fixes|resolves)\s+#{issue_number}\b", body))
+                  if str(head.get("ref") or "").startswith(prefixes) or linked:
+                      matches.append(pull)
+              return matches
+
+          def ensure_stop_branch(base_sha: str) -> None:
+              result = subprocess.run(
+                  ["gh", "api", f"repos/{repository}/git/ref/heads/{stop_branch}"],
+                  capture_output=True, text=True, check=False,
+              )
+              if result.returncode == 0:
+                  return
+              if "404" not in (result.stdout + result.stderr):
+                  raise RuntimeError("could not inspect recovery record branch")
+              subprocess.run(
+                  ["gh", "api", "--method", "POST", f"repos/{repository}/git/refs", "-f", f"ref=refs/heads/{stop_branch}", "-f", f"sha={base_sha}"],
+                  check=True,
+              )
+
+          def record_path(issue_number: int, fingerprint: str, name: str) -> str:
+              return f"{retry_root}/issue-{issue_number}/request-{fingerprint}/{name}"
+
+          def read_record(path: str) -> dict[str, Any] | None:
+              encoded_path = urllib.parse.quote(path, safe="/")
+              result = subprocess.run(
+                  ["gh", "api", f"repos/{repository}/contents/{encoded_path}?ref={stop_branch}"],
+                  capture_output=True, text=True, check=False,
+              )
+              if result.returncode != 0:
+                  if "404" in (result.stdout + result.stderr):
+                      return None
+                  raise RuntimeError("could not read recovery record")
+              payload = json.loads(result.stdout)
+              raw = base64.b64decode(str(payload.get("content") or "").replace("\n", ""))
+              value = json.loads(raw)
+              if not isinstance(value, dict):
+                  raise RuntimeError("recovery record is not an object")
+              return value
+
+          def linear_descendant(
+              current_sha: str,
+              expected_sha: str,
+              fetch_commit,
+              max_depth: int = 32,
+          ) -> bool:
+              sha_pattern = re.compile(r"^[0-9a-f]{40}$")
+              if (
+                  not sha_pattern.fullmatch(current_sha)
+                  or not sha_pattern.fullmatch(expected_sha)
+                  or isinstance(max_depth, bool)
+                  or not isinstance(max_depth, int)
+                  or max_depth < 0
+                  or max_depth > 32
+              ):
+                  return False
+              cursor = current_sha
+              visited: set[str] = set()
+              for depth in range(max_depth + 1):
+                  if cursor == expected_sha:
+                      return True
+                  if depth == max_depth or cursor in visited:
+                      return False
+                  visited.add(cursor)
+                  commit = fetch_commit(cursor)
+                  if not isinstance(commit, dict) or commit.get("sha") != cursor:
+                      return False
+                  parents = commit.get("parents")
+                  if not isinstance(parents, list) or len(parents) != 1:
+                      return False
+                  parent = parents[0]
+                  parent_sha = str(parent.get("sha") or "") if isinstance(parent, dict) else ""
+                  if not sha_pattern.fullmatch(parent_sha):
+                      return False
+                  cursor = parent_sha
+              return False
+
+          def stop_ref_sha() -> str:
+              quoted_branch = urllib.parse.quote(stop_branch, safe="")
+              current_ref = api(f"repos/{repository}/git/ref/heads/{quoted_branch}")
+              current_sha = str((current_ref.get("object") or {}).get("sha") or "")
+              if not exact_sha.fullmatch(current_sha):
+                  raise RuntimeError("recovery record ref identity is invalid")
+              return current_sha
+
+          def ref_linearly_contains(current_sha: str, expected_sha: str) -> bool:
+              return linear_descendant(
+                  current_sha,
+                  expected_sha,
+                  lambda sha: api(f"repos/{repository}/git/commits/{sha}"),
+                  32,
+              )
+
+          def wait_for_record(path: str, payload: dict[str, Any], expected_ancestor: str) -> bool:
+              visibility_delays = (0.0, 0.5, 1.0, 2.0)
+              for delay in visibility_delays:
+                  if delay:
+                      time.sleep(delay)
+                  before_sha = stop_ref_sha()
+                  if not ref_linearly_contains(before_sha, expected_ancestor):
+                      raise RuntimeError("recovery record ref is not a linear descendant")
+                  visible = read_record(path)
+                  after_sha = stop_ref_sha()
+                  if not ref_linearly_contains(after_sha, expected_ancestor):
+                      raise RuntimeError("recovery record ref changed outside the linear history")
+                  if visible is None:
+                      continue
+                  if visible != payload:
+                      raise RuntimeError("deterministic recovery record identity changed")
+                  return True
+              return False
+
+          def put_record(path: str, payload: dict[str, Any], message: str, base_sha: str) -> bool:
+              pattern = rf"{re.escape(retry_root)}/issue-[1-9][0-9]*/request-[0-9a-f]{{20}}/(?:retry-[1-9][0-9]*|internal-stop|exhausted)\.json"
+              if re.fullmatch(pattern, path) is None:
+                  raise RuntimeError("recovery record path is outside the fixed root")
+              ensure_stop_branch(base_sha)
+              existing = read_record(path)
+              if existing is not None:
+                  if existing != payload:
+                      raise RuntimeError("deterministic recovery record identity changed")
+                  return False
+
+              canonical = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+              quoted_branch = urllib.parse.quote(stop_branch, safe="")
+              ref = api(f"repos/{repository}/git/ref/heads/{quoted_branch}")
+              observed_head = str((ref.get("object") or {}).get("sha") or "")
+              if not exact_sha.fullmatch(observed_head):
+                  raise RuntimeError("recovery record branch head is invalid")
+              commit = api(f"repos/{repository}/git/commits/{observed_head}")
+              observed_tree = str((commit.get("tree") or {}).get("sha") or "")
+              if not exact_sha.fullmatch(observed_tree):
+                  raise RuntimeError("recovery record branch tree is invalid")
+
+              blob = typed_api(
+                  "POST",
+                  f"repos/{repository}/git/blobs",
+                  {
+                      "content": base64.b64encode(canonical).decode("ascii"),
+                      "encoding": "base64",
+                  },
+              )
+              blob_sha = str(blob.get("sha") or "")
+              if not exact_sha.fullmatch(blob_sha):
+                  raise RuntimeError("recovery record blob identity is invalid")
+              tree = typed_api(
+                  "POST",
+                  f"repos/{repository}/git/trees",
+                  {
+                      "base_tree": observed_tree,
+                      "tree": [
+                          {
+                              "path": path,
+                              "mode": "100644",
+                              "type": "blob",
+                              "sha": blob_sha,
+                          }
+                      ],
+                  },
+              )
+              tree_sha = str(tree.get("sha") or "")
+              if not exact_sha.fullmatch(tree_sha):
+                  raise RuntimeError("recovery record tree identity is invalid")
+              created = typed_api(
+                  "POST",
+                  f"repos/{repository}/git/commits",
+                  {
+                      "message": message,
+                      "tree": tree_sha,
+                      "parents": [observed_head],
+                  },
+              )
+              commit_sha = str(created.get("sha") or "")
+              if not exact_sha.fullmatch(commit_sha):
+                  raise RuntimeError("recovery record commit identity is invalid")
+
+              try:
+                  typed_api(
+                      "PATCH",
+                      f"repos/{repository}/git/refs/heads/{quoted_branch}",
+                      {"sha": commit_sha, "force": False},
+                  )
+              except RuntimeError:
+                  if wait_for_record(path, payload, observed_head):
+                      return False
+                  raise RuntimeError("recovery record compare-and-swap failed")
+              if not wait_for_record(path, payload, commit_sha):
+                  raise RuntimeError("recovery record visibility remained incomplete")
+              return True
+
+          def retry_records(
+              issue_number: int,
+              fingerprint: str,
+              base_sha: str,
+          ) -> list[dict[str, Any]]:
+              root = record_path(issue_number, fingerprint, "").rstrip("/")
+              encoded = urllib.parse.quote(root, safe="/")
+              result = subprocess.run(
+                  ["gh", "api", f"repos/{repository}/contents/{encoded}?ref={stop_branch}"],
+                  capture_output=True, text=True, check=False,
+              )
+              if result.returncode != 0:
+                  if "404" in (result.stdout + result.stderr):
+                      return []
+                  raise RuntimeError("could not list recovery records")
+              items = json.loads(result.stdout)
+              records = []
+              for item in items:
+                  match = re.fullmatch(r"retry-([1-9][0-9]*)\.json", str(item.get("name") or ""))
+                  if match:
+                      value = read_record(f"{root}/{item['name']}")
+                      if value is not None:
+                          records.append(value)
+              records = sorted(records, key=lambda item: int(item.get("attempt") or 0))
+              return list(validate_retry_records(
+                  records,
+                  issue_number=issue_number,
+                  base_sha=base_sha,
+                  fingerprint=fingerprint,
+                  max_retries=max_retries,
+              ))
+
+          def dispatch_retry(issue: dict[str, Any], base_sha: str, failure_class: FailureClass, source_run_id: int | None) -> bool:
+              issue_number = int(issue["number"])
+              fingerprint = request_fingerprint(issue, base_sha)
+              if any(
+                  read_record(record_path(issue_number, fingerprint, name)) is not None
+                  for name in ("internal-stop.json", "exhausted.json")
+              ):
+                  return False
+
+              records = retry_records(issue_number, fingerprint, base_sha)
+              connected_runs = queue_runs()
+              dispatched_attempts: list[int] = []
+              for record in records:
+                  attempt_value = int(record["attempt"])
+                  if exact_retry_run(
+                      issue_number,
+                      attempt_value,
+                      fingerprint,
+                      base_sha,
+                      connected_runs,
+                  ) is not None:
+                      dispatched_attempts.append(attempt_value)
+              stranded = stranded_retry_attempt(records, dispatched_attempts)
+
+              if stranded is not None:
+                  attempt = stranded
+                  payload = dict(records[attempt - 1])
+              else:
+                  if active_queue_run() or candidate_for_issue(issue_number):
+                      return False
+                  attempt = len(records) + 1
+                  status = build_failure_status(
+                      failure_class=failure_class,
+                      retry_attempt=len(records),
+                      max_retries=max_retries,
+                      checkpoint_sha=None,
+                  )
+                  if not should_auto_retry(failure_class, len(records), max_retries):
+                      name = "exhausted.json" if len(records) >= max_retries else "internal-stop.json"
+                      next_action = (
+                          "optional provider route unavailable; continue GitHub-direct work"
+                          if failure_class is FailureClass.AUTH_SECRET
+                          else status.next_automatic_action
+                      )
+                      put_record(
+                          record_path(issue_number, fingerprint, name),
+                          {
+                              "attempt": len(records),
+                              "base_sha": base_sha,
+                              "failure_class": status.failure_class.value,
+                              "human_action_required": False,
+                              "issue_number": issue_number,
+                              "next_automatic_action": next_action,
+                              "notification": False,
+                              "request_fingerprint": fingerprint,
+                              "source_run_id": source_run_id,
+                          },
+                          f"Record Queue recovery stop for Issue #{issue_number}",
+                          base_sha,
+                      )
+                      return False
+                  payload = {
+                      "attempt": attempt,
+                      "base_sha": base_sha,
+                      "failure_class": failure_class.value,
+                      "human_action_required": False,
+                      "issue_number": issue_number,
+                      "next_automatic_action": "dispatch one optional Queue retry",
+                      "notification": False,
+                      "request_fingerprint": fingerprint,
+                      "source_run_id": source_run_id,
+                  }
+                  path = record_path(issue_number, fingerprint, f"retry-{attempt}.json")
+                  put_record(
+                      path,
+                      payload,
+                      f"Record Queue retry {attempt} for Issue #{issue_number}",
+                      base_sha,
+                  )
+                  visible = read_record(path)
+                  if visible != payload:
+                      raise RuntimeError("retry record was not object-identical before dispatch")
+                  records = retry_records(issue_number, fingerprint, base_sha)
+                  if len(records) != attempt or records[-1] != payload:
+                      raise RuntimeError("retry record collection changed before dispatch")
+
+              if exact_retry_run(issue_number, attempt, fingerprint, base_sha) is not None:
+                  return False
+              if current_default_sha() != base_sha or candidate_for_issue(issue_number):
+                  return False
+              if event_name == "issue_comment" and not wait_for_control_noop(issue_number):
+                  return False
+              if active_queue_run():
+                  return False
+              gh(
+                  "workflow", "run", queue_workflow,
+                  "--repo", repository,
+                  "--ref", default_branch,
+                  "-f", f"issue_number={issue_number}",
+                  "-f", f"request_fingerprint={fingerprint}",
+                  "-f", f"retry_attempt={attempt}",
+              )
+              confirmed = confirm_retry_run(issue_number, attempt, fingerprint, base_sha)
+              if confirmed.get("display_title") != retry_run_title(issue_number, attempt, fingerprint):
+                  raise RuntimeError("confirmed Queue retry run identity changed")
+              return True
+
+          def failure_class_for_run(run: dict[str, Any]) -> FailureClass:
+              run_id = int(run.get("id") or 0)
+              jobs = api_pages(f"repos/{repository}/actions/runs/{run_id}/jobs?filter=all&per_page=100", "jobs")
+              failed = [
+                  job for job in jobs
+                  if job.get("status") == "completed"
+                  and str(job.get("conclusion") or "") not in {"success", "skipped", "neutral", ""}
+              ]
+              detail_parts = [str(run.get("conclusion") or "")]
+              permission_denials = 0
+              explicit_permission_markers = (
+                  "tool policy violated",
+                  "tool permission denied",
+                  "not allowed by tool",
+                  "not permitted by tool",
+                  "command is not allowed",
+              )
+              explicit_max_turn_markers = (
+                  "error_max_turns",
+                  "maximum turn limit reached",
+                  "turn limit exhausted",
+              )
+              max_turns = False
+              for job in failed:
+                  for step in job.get("steps") or []:
+                      if str(step.get("conclusion") or "") == "failure":
+                          name = str(step.get("name") or "").lower()
+                          detail_parts.append(name)
+                          if any(marker in name for marker in explicit_permission_markers):
+                              permission_denials += 1
+                          if any(marker in name for marker in explicit_max_turn_markers):
+                              max_turns = True
+                  job_id = int(job.get("id") or 0)
+                  if job_id > 0:
+                      logs = gh_bytes("api", f"repos/{repository}/actions/jobs/{job_id}/logs", check=False)
+                      low = logs.decode("utf-8", errors="replace").lower()
+                      for marker in (
+                          "connect tunnel", "could not resolve host", "connection reset",
+                          "network is unreachable", "token expired", "authentication failed",
+                          "bad credentials", "missing secret", "http 401", "http 403",
+                          "assertionerror", "tests failed", "service unavailable",
+                          "runner lost communication", "timed out",
+                      ):
+                          if marker in low:
+                              detail_parts.append(marker)
+                      for marker in explicit_permission_markers:
+                          if marker in low:
+                              detail_parts.append(marker)
+                              permission_denials += 1
+                      for marker in explicit_max_turn_markers:
+                          if marker in low:
+                              detail_parts.append(marker)
+                              max_turns = True
+              conclusion = "error_max_turns" if max_turns else str(run.get("conclusion") or "failure")
+              return classify_conclusion(conclusion, permission_denials, "; ".join(detail_parts))
+
+          def verify_artifact(run: dict[str, Any], issue: dict[str, Any]) -> tuple[pathlib.Path, dict[str, Any], str] | None:
+              run_id = int(run.get("id") or 0)
+              artifacts = api(f"repos/{repository}/actions/runs/{run_id}/artifacts?per_page=100").get("artifacts") or []
+              expected_names = {f"queue-complete-{run_id}", f"queue-wip-{run_id}"}
+              matches = [item for item in artifacts if item.get("name") in expected_names and not item.get("expired")]
+              if not matches:
+                  return None
+              if len(matches) != 1:
+                  raise RuntimeError("Queue checkpoint artifact identity is ambiguous")
+              artifact = matches[0]
+              kind = "complete" if artifact["name"].startswith("queue-complete-") else "wip"
+              if kind == "complete":
+                  jobs = api_pages(f"repos/{repository}/actions/runs/{run_id}/jobs?filter=all&per_page=100", "jobs")
+                  verify_jobs = [job for job in jobs if str(job.get("name") or "").split(" /", 1)[0] == "verify"]
+                  if len(verify_jobs) != 1 or verify_jobs[0].get("conclusion") != "success":
+                      raise RuntimeError("complete Queue artifact lacks successful read-only verification")
+              temp = pathlib.Path(tempfile.mkdtemp(prefix="queue-artifact-"))
+              archive = temp / "artifact.zip"
+              with archive.open("wb") as handle:
+                  subprocess.run(["gh", "api", f"repos/{repository}/actions/artifacts/{int(artifact['id'])}/zip"], stdout=handle, check=True)
+              with zipfile.ZipFile(archive) as zipped:
+                  members = zipped.infolist()
+                  names = {member.filename for member in members}
+                  if names != {"candidate.patch", "checkpoint.json"}:
+                      raise RuntimeError("Queue artifact contains unexpected members")
+                  for member in members:
+                      mode = member.external_attr >> 16
+                      if member.is_dir() or stat.S_ISLNK(mode) or pathlib.PurePosixPath(member.filename).is_absolute():
+                          raise RuntimeError("Queue artifact contains an unsafe member")
+                  zipped.extractall(temp / "payload")
+              payload_root = temp / "payload"
+              raw_metadata = (payload_root / "checkpoint.json").read_bytes()
+              patch_bytes = (payload_root / "candidate.patch").read_bytes()
+              metadata = json.loads(raw_metadata)
+              base_sha = str(run.get("head_sha") or "")
+              if (
+                  metadata.get("version") != 1
+                  or metadata.get("base_sha") != base_sha
+                  or metadata.get("checkpoint_kind") != kind
+                  or metadata.get("retry_identity") != f"run-{run_id}-attempt-{int(run.get('run_attempt') or 1)}"
+                  or metadata.get("patch_sha256") != hashlib.sha256(patch_bytes).hexdigest()
+              ):
+                  raise RuntimeError("Queue artifact metadata identity is invalid")
+              digest = hashlib.sha256(raw_metadata + patch_bytes).hexdigest()
+              return payload_root, metadata, digest
+
+          def publish_artifact(run: dict[str, Any], issue: dict[str, Any], artifact: tuple[pathlib.Path, dict[str, Any], str]) -> int:
+              payload_root, metadata, digest = artifact
+              issue_number = int(issue["number"])
+              run_id = int(run["id"])
+              base_sha = str(metadata["base_sha"])
+              if current_default_sha() != base_sha:
+                  raise RuntimeError("default branch moved before checkpoint publication")
+              existing = candidate_for_issue(issue_number)
+              branch = f"automation/queue-issue-{issue_number}-run-{run_id}"
+              foreign = [pull for pull in existing if str((pull.get("head") or {}).get("ref") or "") != branch]
+              if foreign:
+                  raise RuntimeError("a different live candidate already owns this Issue")
+
+              subprocess.run(["git", "checkout", "--detach", base_sha], check=True)
+              subprocess.run(["git", "reset", "--hard", base_sha], check=True)
+              subprocess.run(["git", "clean", "-fdx"], check=True)
+              subprocess.run(["git", "apply", "--check", "--index", str(payload_root / "candidate.patch")], check=True)
+              subprocess.run(["git", "apply", "--index", str(payload_root / "candidate.patch")], check=True)
+              changed = subprocess.check_output(["git", "diff", "--cached", "--name-only", "--no-renames", "-z", base_sha, "--"])
+              changed_paths = sorted(item.decode("utf-8") for item in changed.split(b"\0") if item)
+              declared = sorted(str(item) for item in metadata.get("changed_paths") or [])
+              if changed_paths != declared or not policy.scope_is_authorized(changed_paths, str(issue.get("body") or "")):
+                  raise RuntimeError("checkpoint changed paths exceed the trusted Issue scope")
+              if not policy.protected_scope_is_authorized(changed_paths, str(issue.get("body") or "")):
+                  raise RuntimeError("checkpoint protected paths lack exact authorization")
+              if any(
+                  pathlib.PurePosixPath(path).is_absolute()
+                  or ".." in pathlib.PurePosixPath(path).parts
+                  or path == ".git"
+                  or path.startswith(".git/")
+                  for path in changed_paths
+              ):
+                  raise RuntimeError("checkpoint contains an unsafe path")
+
+              tree_sha = subprocess.check_output(["git", "write-tree"], text=True).strip()
+              ref_result = subprocess.run(
+                  ["gh", "api", f"repos/{repository}/git/ref/heads/{urllib.parse.quote(branch, safe='')}"],
+                  capture_output=True, text=True, check=False,
+              )
+              if ref_result.returncode == 0:
+                  branch_sha = str((json.loads(ref_result.stdout).get("object") or {}).get("sha") or "")
+                  commit = api(f"repos/{repository}/git/commits/{branch_sha}")
+                  parents = [str(item.get("sha") or "") for item in commit.get("parents") or []]
+                  if str((commit.get("tree") or {}).get("sha") or "") != tree_sha or parents != [base_sha]:
+                      raise RuntimeError("existing recovery branch does not match the verified checkpoint")
+                  candidate_sha = branch_sha
+              else:
+                  timestamp = str(run.get("created_at") or "1970-01-01T00:00:00Z")
+                  env = {
+                      **os.environ,
+                      "GIT_AUTHOR_NAME": "github-actions[bot]",
+                      "GIT_AUTHOR_EMAIL": "41898282+github-actions[bot]@users.noreply.github.com",
+                      "GIT_COMMITTER_NAME": "github-actions[bot]",
+                      "GIT_COMMITTER_EMAIL": "41898282+github-actions[bot]@users.noreply.github.com",
+                      "GIT_AUTHOR_DATE": timestamp,
+                      "GIT_COMMITTER_DATE": timestamp,
+                  }
+                  candidate_sha = subprocess.check_output(
+                      ["git", "commit-tree", tree_sha, "-p", base_sha, "-m", f"Recover Queue checkpoint for Issue #{issue_number}"],
+                      text=True, env=env,
+                  ).strip()
+                  subprocess.run(["git", "push", "origin", f"{candidate_sha}:refs/heads/{branch}"], check=True)
+
+              exact = api(f"repos/{repository}/commits/{candidate_sha}")
+              if exact.get("sha") != candidate_sha:
+                  raise RuntimeError("published recovery candidate did not resolve exactly")
+              if current_default_sha() != base_sha:
+                  raise RuntimeError("default branch moved during checkpoint publication")
+              if existing:
+                  pull = existing[0]
+                  if str((pull.get("head") or {}).get("sha") or "") != candidate_sha:
+                      raise RuntimeError("existing candidate Pull Request head is not the verified checkpoint")
+                  return int(pull["number"])
+
+              body = "\n".join([
+                  f"Closes #{issue_number}",
+                  "",
+                  "## Queue recovery identity",
+                  f"- source_run: `{run_id}`",
+                  f"- exact_base_sha: `{base_sha}`",
+                  f"- artifact_sha256: `{digest}`",
+                  f"- checkpoint_kind: `{metadata['checkpoint_kind']}`",
+                  f"- exact_head_sha: `{candidate_sha}`",
+                  f"- changed_paths: `{json.dumps(changed_paths, separators=(',', ':'))}`",
+                  "- implementation_route: `claude-optional -> github-direct`",
+                  "- review_route: `github-coordinator`",
+                  "- review_state: `required`",
+                  "- unresolved_review_threads: `0`",
+                  "- human_action_required: `false`",
+                  "",
+                  "Candidate bytes were applied but not executed by the write-capable publication job. Public read-only CI and Unit Tests must validate this exact head before review or merge.",
+              ])
+              response = json.loads(gh(
+                  "api", "--method", "POST", f"repos/{repository}/pulls",
+                  "-f", f"title=Recover verified Queue checkpoint for Issue #{issue_number}",
+                  "-f", f"head={branch}", "-f", f"base={default_branch}",
+                  "-f", f"body={body}", "-F", "draft=true",
+              ))
+              return int(response["number"])
+
+          def resume_remote_branch(issue: dict[str, Any], base_sha: str) -> int | None:
+              issue_number = int(issue["number"])
+              branches = api_pages(f"repos/{repository}/branches?per_page=100")
+              matches = [item for item in branches if str(item.get("name") or "").startswith(f"claude-issue-{issue_number}-")]
+              if not matches:
+                  return None
+              if len(matches) != 1:
+                  raise RuntimeError("remote Queue checkpoint branches are ambiguous")
+              branch = str(matches[0]["name"])
+              sha = str((matches[0].get("commit") or {}).get("sha") or "")
+              compare = api(f"repos/{repository}/compare/{base_sha}...{sha}")
+              if compare.get("status") != "ahead" or int(compare.get("behind_by") or 0) != 0:
+                  raise RuntimeError("remote Queue checkpoint is not based on the exact default SHA")
+              files = compare.get("files") or []
+              if not isinstance(files, list) or len(files) >= 300:
+                  raise RuntimeError("remote Queue checkpoint changed-file evidence is incomplete")
+              changed_paths = sorted(str(item.get("filename") or "") for item in files)
+              if not changed_paths or not policy.scope_is_authorized(changed_paths, str(issue.get("body") or "")):
+                  raise RuntimeError("remote Queue checkpoint exceeds Issue scope")
+              if not policy.protected_scope_is_authorized(changed_paths, str(issue.get("body") or "")):
+                  raise RuntimeError("remote Queue checkpoint lacks protected authorization")
+              existing = candidate_for_issue(issue_number)
+              foreign = [pull for pull in existing if str((pull.get("head") or {}).get("ref") or "") != branch]
+              if foreign:
+                  raise RuntimeError("another candidate already owns the Issue")
+              if existing:
+                  return int(existing[0]["number"])
+              body = "\n".join([
+                  f"Closes #{issue_number}", "", "## Remote checkpoint recovery",
+                  f"- exact_base_sha: `{base_sha}`", f"- exact_head_sha: `{sha}`",
+                  f"- checkpoint_branch: `{branch}`", "- implementation_route: `claude-optional -> github-direct`",
+                  "- review_route: `github-coordinator`", "- review_state: `required`",
+                  "- human_action_required: `false`",
+              ])
+              response = json.loads(gh(
+                  "api", "--method", "POST", f"repos/{repository}/pulls",
+                  "-f", f"title=Resume Queue checkpoint for Issue #{issue_number}",
+                  "-f", f"head={branch}", "-f", f"base={default_branch}",
+                  "-f", f"body={body}", "-F", "draft=true",
+              ))
+              return int(response["number"])
+
+          def issue_from_run(run: dict[str, Any]) -> dict[str, Any]:
+              identity = parse_queue_run_title(run.get("display_title"))
+              if identity is None or identity["kind"] == "ignored":
+                  raise RuntimeError("Queue run title does not identify one executable Issue")
+              return trusted_issue(int(identity["issue_number"]))
+
+          def issue_from_control_event() -> dict[str, Any]:
+              source = event.get("issue") or {}
+              comment = event.get("comment") or {}
+              number = source.get("number")
+              comment_author = str(((comment.get("user") or {}).get("login") or "")).strip().casefold()
+              if (
+                  source.get("pull_request")
+                  or str(comment.get("body") or "").strip() != control_trigger
+                  or not event_actor
+                  or event_actor not in trusted_owners
+                  or comment_author != event_actor
+                  or isinstance(number, bool)
+                  or not isinstance(number, int)
+                  or number <= 0
+              ):
+                  raise RuntimeError("reconciliation control event is not trusted and exact")
+              return trusted_issue(number)
+
+          def latest_verified_artifact(issue: dict[str, Any], base_sha: str) -> tuple[dict[str, Any], tuple[pathlib.Path, dict[str, Any], str]] | None:
+              issue_number = int(issue["number"])
+              runs = api_pages(
+                  f"repos/{repository}/actions/workflows/{queue_workflow}/runs?per_page=100",
+                  "workflow_runs",
+              )
+              candidates = sorted(
+                  (
+                      run for run in runs
+                      if (parse_queue_run_title(run.get("display_title")) or {}).get("issue_number") == issue_number
+                      and (parse_queue_run_title(run.get("display_title")) or {}).get("kind") != "ignored"
+                      and str(run.get("path") or "").split("@", 1)[0] == ".github/workflows/claude-queue.yml"
+                      and run.get("head_branch") == default_branch
+                      and run.get("head_sha") == base_sha
+                      and run.get("status") == "completed"
+                      and ((run.get("repository") or {}).get("full_name") or repository) == repository
+                  ),
+                  key=lambda run: (
+                      int(run.get("run_number") or 0),
+                      int(run.get("run_attempt") or 0),
+                      int(run.get("id") or 0),
+                  ),
+                  reverse=True,
+              )
+              for run in candidates:
+                  artifact = verify_artifact(run, issue)
+                  if artifact is not None:
+                      return run, artifact
+              return None
+
+          base_sha = current_default_sha()
+          action = "none"
+          selected_issue: dict[str, Any] | None = None
+          source_run_id: int | None = None
+
+          if event_name == "workflow_run":
+              run = event.get("workflow_run") or {}
+              if (
+                  str(run.get("path") or "").split("@", 1)[0] != ".github/workflows/claude-queue.yml"
+                  or run.get("head_branch") != default_branch
+                  or run.get("status") != "completed"
+                  or ((run.get("repository") or {}).get("full_name") or repository) != repository
+              ):
+                  raise RuntimeError("workflow_run is not the fixed Queue completion")
+              run_identity = parse_queue_run_title(run.get("display_title"))
+              if run_identity is None:
+                  raise RuntimeError("Queue completion title is invalid")
+              if run_identity["kind"] == "ignored":
+                  selected_issue = trusted_issue(int(run_identity["issue_number"]))
+                  source_run_id = int(run.get("id") or 0)
+                  action = "ignored_control_noop"
+              else:
+                  selected_issue = issue_from_run(run)
+                  source_run_id = int(run.get("id") or 0)
+                  artifact = verify_artifact(run, selected_issue)
+                  if artifact is not None:
+                      resumed = resume_remote_branch(selected_issue, base_sha)
+                      if resumed is not None:
+                          action = f"resumed_pr_{resumed}"
+                      else:
+                          pr_number = publish_artifact(run, selected_issue, artifact)
+                          action = f"published_pr_{pr_number}"
+                  elif not candidate_for_issue(int(selected_issue["number"])):
+                      failure_class = failure_class_for_run(run)
+                      if dispatch_retry(selected_issue, base_sha, failure_class, source_run_id):
+                          action = "retry_dispatched"
+                      else:
+                          action = f"stopped_{failure_class.value}"
+          elif event_name == "issue_comment":
+              selected_issue = issue_from_control_event()
+              if not candidate_for_issue(int(selected_issue["number"])):
+                  resumed = resume_remote_branch(selected_issue, base_sha)
+                  if resumed is not None:
+                      action = f"resumed_pr_{resumed}"
+                  else:
+                      recovered = latest_verified_artifact(selected_issue, base_sha)
+                      if recovered is not None:
+                          recovered_run, artifact = recovered
+                          source_run_id = int(recovered_run.get("id") or 0)
+                          pr_number = publish_artifact(recovered_run, selected_issue, artifact)
+                          action = f"published_pr_{pr_number}"
+                      elif dispatch_retry(selected_issue, base_sha, FailureClass.UNKNOWN, None):
+                          action = "control_retry_dispatched"
+                      else:
+                          action = "control_already_recorded"
+          else:
+              if not active_queue_run():
+                  issues = api_pages(f"repos/{repository}/issues?state=open&sort=updated&direction=desc&per_page=100")
+                  for issue_record in issues:
+                      if issue_record.get("pull_request"):
+                          continue
+                      try:
+                          issue = trusted_issue(int(issue_record.get("number") or 0))
+                      except RuntimeError:
+                          continue
+                      if trigger_identity(issue) is None or candidate_for_issue(int(issue["number"])):
+                          continue
+                      selected_issue = issue
+                      resumed = resume_remote_branch(issue, base_sha)
+                      if resumed is not None:
+                          action = f"resumed_pr_{resumed}"
+                      else:
+                          recovered = latest_verified_artifact(issue, base_sha)
+                          if recovered is not None:
+                              recovered_run, artifact = recovered
+                              source_run_id = int(recovered_run.get("id") or 0)
+                              pr_number = publish_artifact(recovered_run, issue, artifact)
+                              action = f"published_pr_{pr_number}"
+                          elif dispatch_retry(issue, base_sha, FailureClass.UNKNOWN, None):
+                              action = "silent_stop_retry_dispatched"
+                          else:
+                              action = "silent_stop_already_recorded"
+                      break
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## Bounded Queue recovery\n\n")
+              summary.write(f"- action: `{action}`\n")
+              summary.write(f"- issue: `{int(selected_issue['number']) if selected_issue else 'none'}`\n")
+              summary.write(f"- source_run: `{source_run_id or 'none'}`\n")
+              summary.write(f"- exact_default_sha: `{base_sha}`\n")
+              summary.write("- candidate_execution_with_write_token: `false`\n")
+              summary.write("- notification: `false`\n")
+              summary.write("- human_action_required: `false`\n")
+          PY

@@ -1,15 +1,23 @@
-name: Trusted Recovery and Merge Supervisor
+name: GitHub Coordinator Supervisor
 
 on:
   workflow_run:
-    workflows: ["CI", "Unit Tests", "Claude Issue Queue", "Trusted CI Reconciliation", "Trusted Exact-SHA Checks"]
+    workflows: ["CI", "Unit Tests"]
     types: [completed]
+  issue_comment:
+    types: [created]
   schedule:
     - cron: "41 * * * *"
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Optional single Pull Request number; empty performs a bounded sweep
+        required: false
+        default: ""
+        type: string
 
 concurrency:
-  group: foundation-supervisor
+  group: foundation-github-coordinator
   cancel-in-progress: false
 
 permissions: {}
@@ -20,19 +28,57 @@ jobs:
     timeout-minutes: 15
     permissions:
       actions: read
-      checks: read
       contents: write
-      issues: write
+      issues: read
       pull-requests: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
-      - name: Reconcile bounded same-repository candidates through the final guard
+      - name: Resolve bounded candidate set
+        id: targets
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PATH: ${{ github.event_path }}
+          DISPATCH_PR: ${{ inputs.pr_number }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          event = json.loads(Path(os.environ["EVENT_PATH"]).read_text(encoding="utf-8"))
+          name = os.environ["EVENT_NAME"]
+          values = []
+          if name == "workflow_run":
+              pulls = (event.get("workflow_run") or {}).get("pull_requests") or []
+              if len(pulls) == 1 and isinstance(pulls[0].get("number"), int):
+                  values = [pulls[0]["number"]]
+          elif name == "issue_comment":
+              issue = event.get("issue") or {}
+              if issue.get("pull_request") and isinstance(issue.get("number"), int):
+                  values = [issue["number"]]
+          elif name == "workflow_dispatch":
+              raw = os.environ.get("DISPATCH_PR", "").strip()
+              if raw:
+                  if not raw.isdigit() or int(raw) <= 0:
+                      raise SystemExit("invalid Pull Request number")
+                  values = [int(raw)]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("numbers=" + ",".join(str(value) for value in values) + "\n")
+          PY
+      - name: Evaluate, ready, and expected-head merge
         env:
           GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
           AUTOMATION_OWNER: ${{ vars.AUTOMATION_OWNER || github.repository_owner }}
-        run: python -m scripts.supervisor_final_guard
+          TARGET_NUMBERS: ${{ steps.targets.outputs.numbers }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "$TARGET_NUMBERS" ]; then
+            IFS=',' read -ra numbers <<< "$TARGET_NUMBERS"
+            for number in "${numbers[@]}"; do
+              args+=(--pr-number "$number")
+            done
+          fi
+          python -m scripts.github_coordinator_supervisor "${args[@]}"

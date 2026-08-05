@@ -1,33 +1,49 @@
 <!-- ai-dev-automation-foundation:generated-target -->
 # Installation checklist
 
-- [ ] Optionally set repository variable `AUTOMATION_OWNER` to `shiroku46`; the repository owner is the fail-closed default.
-- [ ] Require the trusted source Issue to allowlist every changed and renamed path; bounded patterns such as `tests/**` may be used.
-- [ ] Keep the ordinary Issue allowlist independent from the protected-change authorization block; every protected path must appear in both.
-- [ ] Confirm the fixed default-branch `trusted-checks.yml` workflow is present.
-- [ ] Confirm candidate jobs are read-only and publish no custom checks or statuses.
-- [ ] Confirm the supervisor validates immutable workflow-run and exact job evidence.
-- [ ] Confirm readiness and merge require successful exact-head native pull-request workflow evidence for `CI`, `Unit Tests`, and `E2E Acceptance` when fixed `e2e.yml` is installed.
-- [ ] Confirm all required native workflow definitions are compared against one stable default-branch commit, and that commit is rechecked after every blob and run query.
-- [ ] Confirm each candidate workflow file blob exactly equals the blob from that one stable default-branch commit before native run evidence is trusted.
-- [ ] Confirm native runs belong to the exact Pull Request and reject missing, pending, failed, stale-SHA, wrong-workflow, wrong-repository, cross-PR, candidate-modified-workflow, and candidate-authored evidence.
-- [ ] Confirm Queue failure creates no routine Issue or Pull Request comment and no failure-state blocked/review label mutation.
-- [ ] Confirm Queue recovery is bounded, deterministic, idempotent, non-notifying, and persists only public-safe records on the fixed internal-stop branch.
-- [ ] Confirm the supervisor reconciles `Claude Issue Queue` completion through `supervisor_queue_recovery_v3` before the final merge guard.
-- [ ] Confirm trusted attestation, native workflow evidence, current source/scope authorization, candidate identity, and merge use one unchanged default-branch SHA.
-- [ ] Confirm final merge re-fetches an open, explicitly non-draft, mergeable exact-head Pull Request with explicit label evidence, no `ai-no-merge`, same-repository provenance, and the same authorized source Issue/scope.
-- [ ] Confirm the final merge evidence gate is single-use and consumed by the first merge attempt, including a rejected attempt.
-- [ ] Confirm the supervisor has only the bounded `contents: write` needed for the fixed `automation-internal-stops` branch.
-- [ ] Confirm internal stops are sanitized canonical JSON at `automation-stops/pr-<number>/<sha>/<REASON>.json` and are never posted as Issue or Pull Request comments or represented by routine label mutations.
-- [ ] Confirm a failed audit or moved head writes no internal-stop record or close action.
-- [ ] Confirm Codex no-progress uses the immutable trusted request timestamp and merge-state no-progress uses the latest immutable clean evidence.
-- [ ] Confirm combined Codex comments and reviews are ordered by immutable event time before the latest exact-SHA evidence is selected.
-- [ ] Confirm only the three canonical account/provider UI reason codes can create a human-only notice.
-- [ ] Confirm account-level repository absence is independently derived from connected GitHub API queries for the exact targets and caller assertions must match that evidence.
-- [ ] Confirm credential and integration-reconnection notices fail closed until a reason-specific connected provider evidence adapter exists.
-- [ ] Confirm every human-only notice re-derives the connected condition inside the final audit, persists an exact deterministic audit record, and rechecks the condition immediately before publication.
-- [ ] Confirm the notice record binds Issue, Pull Request, SHA, attempted connected paths, impossibility evidence, canonical UI action, target/provider, and automatic-resumption condition.
-- [ ] Confirm human-only deduplication requires both the exact persisted record and an immutable `github-actions[bot]` comment.
-- [ ] Configure `CLAUDE_CODE_OAUTH_TOKEN` only through GitHub/provider UI.
-- [ ] Run export guard, validator, and tests.
-- [ ] Validate in a disposable E2E repository.
+## Phase 0 — Mandatory GitHub setup
+
+- [ ] Connect ChatGPT to GitHub and authorize this exact repository.
+- [ ] Confirm GitHub Actions and Foundation workflows exist on the default branch.
+- [ ] Select **Read and write permissions** under `Settings` → `Actions` → `General` → `Workflow permissions`.
+- [ ] Enable **Allow GitHub Actions to create and approve pull requests**.
+- [ ] Optionally set `AUTOMATION_OWNER` to `shiroku46` when the repository owner is not the trusted coordinator.
+- [ ] Run `python scripts/public_export_guard.py .`, `python scripts/validate_repository.py`, and `python scripts/foundation_drift.py --root .`.
+- [ ] Complete one harmless branch/PR candidate with exact-head checks, GitHub coordinator review, zero unresolved threads, and expected-head merge.
+
+Codex and Claude setup is optional. Provider environment, credential, quota, account, setup or connection is not required for GitHub-only acceptance or product development.
+
+## Installation identity
+
+- installation mode: `existing-product`
+- version file: `FOUNDATION.lock.json`
+- [ ] Confirm the lock records the exact Foundation source SHA and sorted managed-file hashes.
+- [ ] Keep target-owned files outside the managed lock.
+- [ ] Configure required product workflows in `.github/foundation-product-checks.json`; the previous default-branch config judges each configuration-changing PR.
+- [ ] For upgrades, render a candidate in a separate directory and compare locks before publication.
+
+## Non-destructive publication
+
+- [ ] Compute and review the complete Bootstrap plan before mutation.
+- [ ] Publish the rendered bytes on one dedicated same-repository branch through the connected GitHub App/API route.
+- [ ] Open one Draft Pull Request against the exact observed default-branch SHA.
+- [ ] Verify the GitHub-visible candidate head and exact changed paths.
+- [ ] Do not create a temporary installer workflow on the default branch.
+- [ ] Do not request `BOOTSTRAP_WORKFLOW_TOKEN`, a PAT, or another long-lived credential.
+- [ ] Do not force-update the Bootstrap branch.
+- [ ] Roll back by closing the unmerged Draft PR, or revert one protected merge.
+
+## Operating boundary
+
+- [ ] Use one trusted owner-authored Issue with risk tier, bounded paths, checks, prohibited effects, and rollback.
+- [ ] Inspect current and renamed-path collisions before implementation and merge.
+- [ ] Never push automation changes directly to the default branch.
+- [ ] Require exact-head `CI` and `Unit Tests`.
+- [ ] Require `review_route: github-coordinator` and zero unresolved review threads.
+- [ ] Protected work requires explicit authorization and clean scope/security plus correctness/race markers.
+- [ ] `ai-no-merge` blocks readiness and merge.
+- [ ] Merge only with expected-head-SHA protection.
+- [ ] Optional provider failure remains non-blocking with `human_action_required: false`.
+- [ ] Persist routine automation stops only on `automation-internal-stops`; never publish routine stop comments.
+- [ ] Never output, persist, copy, hash, or infer Secret values.
+- [ ] Never execute proposed-branch code in a job carrying Secrets, OIDC, or repository write permission.
