@@ -105,6 +105,18 @@ def require_creative_candidate(
             "quality_stage",
         )
 
+    if candidate.get("request_ref") != request_id:
+        raise QualityGateError(
+            "STALE_REVIEW",
+            "candidate source request does not match the required request",
+            "request_ref",
+        )
+    if candidate_id is not None and candidate.get("id") != candidate_id:
+        raise QualityGateError(
+            "STALE_REVIEW",
+            "candidate id does not match the required candidate",
+            "id",
+        )
     if candidate_id is not None and review.get("candidate_ref") != candidate_id:
         raise QualityGateError(
             "STALE_REVIEW",
