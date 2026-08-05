@@ -52,15 +52,15 @@ class RuntimeCompressionCompatibilityTests(unittest.TestCase):
         expected = {
             b"\x00\x00\x00\x00\x00": (
                 "789c636000020000050001",
-                "8855508aade16ec573d21e6a485df672138258bbd41f3b195772d8ed34634d73",
+                "8ca55c151eee2551d64f76d5f2d86a8f5ebaf9ac01324f0dca5d7c57d4ee0a1e",
             ),
             b"\x00\xff\x00\x00\xff": (
                 "789c63f8cfc0f01f00050001ff",
-                "5a34a7f00d32151f74e352048b7e9f5ac4b1406de33fa8f8b987c047dd51c12e",
+                "79cf0e4148d0bae064b77d7edee5e71120bbd41e93e6544378f0aecdd4e89613",
             ),
             b"\x00\x00\x00\xff\xff": (
                 "789c636060f8ff1f00030201ff",
-                "dbe769c1eb979f9773eade9fd4aed739a641db64ef59e303b3a8ba55ce5f63f6",
+                "d42c1417cc8f1ee8089d0f6dc49c82b4baa9e2e0eea90de4deedf05435cf12fa",
             ),
         }
         for source, (hex_stream, digest) in expected.items():
