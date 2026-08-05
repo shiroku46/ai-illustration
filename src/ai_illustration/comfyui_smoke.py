@@ -9,9 +9,24 @@ from typing import Any, Sequence
 
 from .adapters.base import AdapterError
 from .comfyui_smoke_common import (
-    BINDINGS_FILE, EXECUTION_FILE, MANIFEST_FILE, MODEL_FILE, PROFILE_STATES, REQUEST_FILE,
-    TOOL_FILE, WORKFLOW_FILE, SmokeError, _json_bytes, inspect_workflow,
+    BINDINGS_FILE,
+    EXECUTION_FILE,
+    MANIFEST_FILE,
+    MODEL_FILE,
+    PROFILE_STATES,
+    REQUEST_FILE,
+    TOOL_FILE,
+    WORKFLOW_FILE,
+    SmokeError,
+    _json_bytes,
 )
+from .comfyui_smoke_graph import inspect_workflow, install as _install_graph
+
+# Internal bundle modules bind the inspector at import time. Install the
+# current graph implementation first so direct CLI/public-module use supports
+# both classic KSampler and the official SDXL Turbo SamplerCustom layout.
+_install_graph()
+
 from .comfyui_smoke_bundle import prepare_bundle
 from .comfyui_smoke_check import check_bundle
 
@@ -49,7 +64,9 @@ def _inspection_options(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m ai_illustration.comfyui_smoke")
+    parser = argparse.ArgumentParser(
+        prog="python -m ai_illustration.comfyui_smoke"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     inspect_parser = sub.add_parser("inspect")
     inspect_parser.add_argument("workflow", type=Path)
@@ -58,7 +75,11 @@ def _parser() -> argparse.ArgumentParser:
     prepare_parser = sub.add_parser("prepare")
     prepare_parser.add_argument("workflow", type=Path)
     prepare_parser.add_argument("--output-root", type=Path, required=True)
-    prepare_parser.add_argument("--profile-state", choices=sorted(PROFILE_STATES), default="reviewing")
+    prepare_parser.add_argument(
+        "--profile-state",
+        choices=sorted(PROFILE_STATES),
+        default="reviewing",
+    )
     prepare_parser.add_argument("--review-date", required=True)
     prepare_parser.add_argument("--tool-evidence-url")
     prepare_parser.add_argument("--model-evidence-url")
@@ -68,7 +89,9 @@ def _parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--tool-id", default="comfyui-local-api")
     prepare_parser.add_argument("--model-id")
     prepare_parser.add_argument("--request-id")
-    prepare_parser.add_argument("--endpoint", default="http://127.0.0.1:8188")
+    prepare_parser.add_argument(
+        "--endpoint", default="http://127.0.0.1:8188"
+    )
     prepare_parser.add_argument("--minimum-vram-gb", type=int, default=0)
     prepare_parser.add_argument("--minimum-ram-gb", type=int, default=0)
     prepare_parser.add_argument("--write", action="store_true")
@@ -84,7 +107,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command == "inspect":
-            result = inspect_workflow(args.workflow, **_inspection_options(args))
+            result = inspect_workflow(
+                args.workflow, **_inspection_options(args)
+            )
         elif args.command == "prepare":
             result = prepare_bundle(
                 args.workflow,
@@ -113,13 +138,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         field = getattr(exc, "field", "")
         result = {
             "ok": False,
-            "diagnostics": [{"code": str(code), "message": str(message), "field": str(field)}],
+            "diagnostics": [
+                {
+                    "code": str(code),
+                    "message": str(message),
+                    "field": str(field),
+                }
+            ],
             "network_contacted": False,
             "external_process_started": False,
         }
     sys.stdout.buffer.write(_json_bytes(result))
     print(
-        f"ComfyUI smoke {args.command}: {'ok' if result.get('ok') else 'failed'}",
+        f"ComfyUI smoke {args.command}: "
+        f"{'ok' if result.get('ok') else 'failed'}",
         file=sys.stderr,
     )
     return 0 if result.get("ok") else 1
