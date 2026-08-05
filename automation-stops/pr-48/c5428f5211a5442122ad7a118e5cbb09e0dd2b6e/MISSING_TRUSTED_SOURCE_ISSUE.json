@@ -1,0 +1,28 @@
+{
+  "audit": {
+    "alternative_connected_paths": "trusted-checks.yml:active:325412905;ci-reconcile.yml:active:325412899;supervisor.yml:active:325412904;claude-queue.yml:active:325412902",
+    "changed_and_renamed_paths": "[\".gitattributes\",\".github/workflows/unit-tests.yml\",\"src/ai_illustration/__init__.py\",\"tests/test_video_export_plan.py\",\"tests/test_video_export_runtime.py\",\"tests/video_export_test_support.py\"]",
+    "check_evidence": "[{\"app\":\"github-actions\",\"conclusion\":\"success\",\"name\":\"test (ubuntu-latest)\",\"status\":\"completed\"},{\"app\":\"github-actions\",\"conclusion\":\"failure\",\"name\":\"test (windows-latest)\",\"status\":\"completed\"},{\"app\":\"github-actions\",\"conclusion\":\"success\",\"name\":\"validate\",\"status\":\"completed\"}]",
+    "exact_head_sha": "c5428f5211a5442122ad7a118e5cbb09e0dd2b6e",
+    "human_only_connected_evidence": "not-applicable",
+    "idempotency": "automation-stops/pr-48/c5428f5211a5442122ad7a118e5cbb09e0dd2b6e/MISSING_TRUSTED_SOURCE_ISSUE.json",
+    "issue": "unknown",
+    "mergeability": "mergeable=True,mergeable_state=unstable",
+    "native_pull_request_workflow_evidence": "{\"clean\":false,\"runs\":[]}",
+    "permissions_and_credentials": "automation_owner_permission=admin,secret_values_not_requested=true",
+    "pull_request": "#48",
+    "reason_code": "MISSING_TRUSTED_SOURCE_ISSUE",
+    "repository_metadata": "visibility=public,default_branch=main,initial_and_final_head_confirmed=true",
+    "review_and_provenance": "codex=pending,codex_timestamp=None,trusted_request_timestamp=None,unresolved_threads=False",
+    "scope_and_authorization": "issue=not-applicable,authorization=not-applicable",
+    "workflow_run_and_job_evidence": "[]"
+  },
+  "detail": "PR body identifies no trusted source Issue.",
+  "exact_head_sha": "c5428f5211a5442122ad7a118e5cbb09e0dd2b6e",
+  "issue_number": null,
+  "notification": false,
+  "pull_request_number": 48,
+  "reason_code": "MISSING_TRUSTED_SOURCE_ISSUE",
+  "required_human_action": null,
+  "schema_version": 1
+}
