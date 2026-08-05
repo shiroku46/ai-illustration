@@ -8,34 +8,73 @@
 </head>
 <body>
   <header>
-    <p class="eyebrow">LOCAL REVIEW</p>
+    <p class="eyebrow">LOCAL REVIEW / READ ONLY</p>
     <h1>漫才キャラクター候補比較</h1>
-    <p>最大4候補を比較し、レビューJSONをブラウザ内で作成します。サーバー側への書き込みは行いません。</p>
+    <p>最大4候補を比較し、技術状態とクリエイティブ承認を分離したレビューJSONをブラウザ内で作成します。サーバー側への書き込みは行いません。</p>
   </header>
   <main>
+    <section class="panel quality-guide" aria-labelledby="quality-guide-title">
+      <h2 id="quality-guide-title">品質段階</h2>
+      <div class="stage-guide">
+        <p><strong>transport_smoke_output</strong><span>通信・保存・PNG検証が動いた証拠です。キャラクター候補ではありません。</span></p>
+        <p><strong>technical_candidate</strong><span>技術検証済みです。まだ絵柄・人物設計の承認ではありません。</span></p>
+        <p><strong>creative_candidate</strong><span>所有者が同一画像をcreative scopeで明示承認したレビュー結果です。生成器の状態ではありません。</span></p>
+      </div>
+    </section>
+
     <section class="panel filters" aria-label="filters">
       <label>キャラクター <select id="character-filter"><option value="">すべて</option></select></label>
       <label>役割 <select id="role-filter"><option value="">すべて</option><option value="boke">ボケ</option><option value="tsukkomi">ツッコミ</option></select></label>
       <label>表情 <select id="expression-filter"><option value="">すべて</option></select></label>
       <label>ポーズ <select id="pose-filter"><option value="">すべて</option></select></label>
+      <label>品質段階 <select id="quality-filter"><option value="">すべて</option></select></label>
       <label>レビュー <select id="review-filter"><option value="">すべて</option></select></label>
       <button id="clear-selection" type="button">比較選択を解除</button>
     </section>
+
     <p id="status" role="status">候補を読み込んでいます…</p>
     <section id="candidate-list" class="candidate-list" aria-label="candidate list"></section>
+
     <section class="panel comparison">
       <h2>比較ボード <span id="selected-count">0/4</span></h2>
       <div id="comparison-grid" class="comparison-grid"></div>
     </section>
-    <section class="panel review-form">
-      <h2>レビューを書き出す</h2>
-      <label>対象候補 <select id="review-candidate"></select></label>
-      <label>判定 <select id="decision"></select></label>
-      <label>レビュアー <input id="reviewer" required autocomplete="off"></label>
-      <fieldset><legend>指摘カテゴリ</legend><div id="category-list" class="category-list"></div></fieldset>
+
+    <section class="panel review-form" aria-labelledby="review-title">
+      <h2 id="review-title">レビューJSONを書き出す</h2>
+      <div class="form-grid">
+        <label>対象候補 <select id="review-candidate"></select></label>
+        <label>レビュー範囲
+          <select id="review-scope">
+            <option value="technical">technical（技術レビュー）</option>
+          </select>
+        </label>
+        <label>判定 <select id="decision"></select></label>
+        <label>レビュアー <input id="reviewer" required autocomplete="off"></label>
+      </div>
+
+      <div class="gate-panel" aria-live="polite">
+        <p><strong>技術状態:</strong> <span id="technical-status">—</span></p>
+        <p><strong>入力品質段階:</strong> <span id="input-quality-stage">—</span></p>
+        <p><strong>結果品質段階:</strong> <output id="resulting-stage">—</output></p>
+        <p id="review-gate-status" role="status">比較ボードから候補を選択してください。</p>
+      </div>
+
+      <fieldset>
+        <legend>観察・指摘カテゴリ</legend>
+        <p class="field-help">通常の所見です。hard failとは別に記録されます。</p>
+        <div id="category-list" class="category-list"></div>
+      </fieldset>
+
+      <fieldset id="hard-fail-fieldset">
+        <legend>クリエイティブ hard fail</legend>
+        <p class="field-help">人体破綻・意図しない背景・AI的画風・identity driftなど。1件でも選択したcreative acceptは作成できません。</p>
+        <div id="hard-fail-list" class="category-list hard-fail-list"></div>
+      </fieldset>
+
       <label>メモ <textarea id="notes" rows="4"></textarea></label>
-      <button id="download-review" type="button">レビューJSONをダウンロード</button>
-      <pre id="review-preview" aria-live="polite"></pre>
+      <button id="download-review" type="button" disabled>レビューJSONをダウンロード</button>
+      <pre id="review-preview" aria-live="polite">レビュー条件を満たすと、ここにダウンロード対象と同一のJSONが表示されます。</pre>
     </section>
   </main>
   <script src="/app.js" defer></script>
