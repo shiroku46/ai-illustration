@@ -5,6 +5,7 @@ from pathlib import Path
 import unittest
 
 from ai_illustration.quality import (
+    CANDIDATE_INTENT,
     CREATIVE_CANDIDATE,
     HARD_FAIL_CATEGORIES,
     TECHNICAL_CANDIDATE,
@@ -51,7 +52,11 @@ class QualityContractTests(unittest.TestCase):
             TRANSPORT_SMOKE_OUTPUT,
         )
         self.assertEqual(packaged_quality_stage({}), TECHNICAL_CANDIDATE)
+        self.assertEqual(packaged_quality_stage({"output_intent": CANDIDATE_INTENT}), TECHNICAL_CANDIDATE)
         self.assertNotEqual(packaged_quality_stage({}), CREATIVE_CANDIDATE)
+        with self.assertRaises(QualityGateError) as raised:
+            packaged_quality_stage({"output_intent": "transport-smok"})
+        self.assertEqual(raised.exception.code, "OUTPUT_INTENT")
 
     def test_missing_stage_and_smoke_output_fail_closed(self) -> None:
         self.assert_gate_code("CREATIVE_GATE_REQUIRED", {**self.candidate, "quality_stage": None})
@@ -67,6 +72,14 @@ class QualityContractTests(unittest.TestCase):
         self.assert_gate_code("STALE_REVIEW", review={**self.review, "candidate_ref": "candidate-two"})
         self.assert_gate_code("STALE_REVIEW", review={**self.review, "candidate_request_ref": "request-two"})
         self.assert_gate_code("STALE_REVIEW", review={**self.review, "candidate_sha256": "b" * 64})
+
+    def test_legacy_review_fields_fail_closed(self) -> None:
+        legacy = {
+            key: value
+            for key, value in self.review.items()
+            if key not in {"review_scope", "resulting_quality_stage", "hard_fail_categories"}
+        }
+        self.assert_gate_code("CREATIVE_REVIEW_REQUIRED", review=legacy)
 
     def test_missing_checksum_or_reviewer_is_rejected(self) -> None:
         self.assert_gate_code("CHECKSUM", candidate={**self.candidate, "sha256": None})
