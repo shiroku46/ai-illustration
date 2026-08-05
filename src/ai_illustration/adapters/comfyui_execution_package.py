@@ -20,6 +20,7 @@ from .comfyui_execution_common import (
 )
 from .comfyui_png import decode_comfyui_png
 from ..naming import content_identifier, safe_relative_path
+from ..quality import QualityGateError, packaged_quality_stage
 
 
 def safe_descriptor(value: Any, field: str, *, allow_empty: bool) -> str:
@@ -89,6 +90,10 @@ def candidate_files(plan: dict[str, Any], prompt_id: str, descriptor: dict[str, 
         image = decode_comfyui_png(png, expected_width=plan["expected_width"], expected_height=plan["expected_height"])
     except Exception as exc:
         raise AdapterError("PNG_INVALID", str(exc), descriptor["filename"]) from exc
+    try:
+        quality_stage = packaged_quality_stage(plan["request"])
+    except QualityGateError as exc:
+        raise AdapterError(exc.code, exc.message, exc.field) from exc
     png_sha = sha256(png)
     identity = {
         "plan_ref": plan["id"],
@@ -113,6 +118,7 @@ def candidate_files(plan: dict[str, Any], prompt_id: str, descriptor: dict[str, 
         "has_alpha": image.has_alpha,
         "media_type": "image/png",
         "status": "technically_valid",
+        "quality_stage": quality_stage,
         "provenance": {
             "source": ADAPTER_ID,
             "adapter_version": ADAPTER_VERSION,
