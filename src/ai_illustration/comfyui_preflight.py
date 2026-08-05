@@ -15,8 +15,21 @@ from .comfyui_preflight_http import (
     PreflightHttpLimits,
     encode_node_class,
 )
+from .comfyui_smoke_graph import install as _install_smoke_graph
+
+# Phase 18's internal bundle modules bind the inspector at import time. Install
+# the current classic/SDXL-Turbo graph implementation before importing them so
+# direct preflight module use cannot fall back to the legacy inspector.
+_install_smoke_graph()
+
 from .comfyui_smoke_check import _load_canonical, check_bundle
-from .comfyui_smoke_common import REQUEST_FILE, WORKFLOW_FILE, SmokeError, _json_bytes, _load_workflow
+from .comfyui_smoke_common import (
+    REQUEST_FILE,
+    WORKFLOW_FILE,
+    SmokeError,
+    _json_bytes,
+    _load_workflow,
+)
 
 
 MAX_NODE_CLASSES = 512
@@ -24,7 +37,9 @@ MAX_CHECKPOINTS = 10_000
 MAX_CHECKPOINT_CHARS = 1024
 MAX_DEVICES = 32
 MAX_TEXT_CHARS = 4096
-ABSOLUTE_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|/(?:home|Users|tmp|var|opt|mnt)/)")
+ABSOLUTE_PATH_RE = re.compile(
+    r"(?:[A-Za-z]:[\\/]|/(?:home|Users|tmp|var|opt|mnt)/)"
+)
 
 
 def _diagnostic(exc: Exception) -> dict[str, str]:
@@ -53,9 +68,18 @@ def _failed(
     }
 
 
-def _clean_text(value: Any, field: str, *, maximum: int = MAX_TEXT_CHARS) -> str:
+def _clean_text(
+    value: Any,
+    field: str,
+    *,
+    maximum: int = MAX_TEXT_CHARS,
+) -> str:
     if not isinstance(value, str):
-        raise AdapterError("SYSTEM_STATS_SCHEMA", f"{field} must be a string", field)
+        raise AdapterError(
+            "SYSTEM_STATS_SCHEMA",
+            f"{field} must be a string",
+            field,
+        )
     normalized = " ".join(value.split())
     if (
         not normalized
@@ -71,11 +95,24 @@ def _clean_text(value: Any, field: str, *, maximum: int = MAX_TEXT_CHARS) -> str
     return normalized
 
 
-def _bounded_integer(value: Any, field: str, *, nullable: bool = False) -> int | None:
+def _bounded_integer(
+    value: Any,
+    field: str,
+    *,
+    nullable: bool = False,
+) -> int | None:
     if nullable and value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 2**63 - 1:
-        raise AdapterError("SYSTEM_STATS_SCHEMA", f"{field} must be a non-negative integer", field)
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= 2**63 - 1
+    ):
+        raise AdapterError(
+            "SYSTEM_STATS_SCHEMA",
+            f"{field} must be a non-negative integer",
+            field,
+        )
     return value
 
 
@@ -83,8 +120,16 @@ def _system_summary(value: dict[str, Any]) -> dict[str, Any]:
     system = value.get("system")
     devices = value.get("devices")
     if not isinstance(system, dict):
-        raise AdapterError("SYSTEM_STATS_SCHEMA", "system must be an object", "system_stats.system")
-    if not isinstance(devices, list) or not devices or len(devices) > MAX_DEVICES:
+        raise AdapterError(
+            "SYSTEM_STATS_SCHEMA",
+            "system must be an object",
+            "system_stats.system",
+        )
+    if (
+        not isinstance(devices, list)
+        or not devices
+        or len(devices) > MAX_DEVICES
+    ):
         raise AdapterError(
             "SYSTEM_STATS_SCHEMA",
             f"devices must contain from 1 to {MAX_DEVICES} entries",
@@ -94,14 +139,36 @@ def _system_summary(value: dict[str, Any]) -> dict[str, Any]:
     for index, item in enumerate(devices):
         field = f"system_stats.devices[{index}]"
         if not isinstance(item, dict):
-            raise AdapterError("SYSTEM_STATS_SCHEMA", "device entry must be an object", field)
+            raise AdapterError(
+                "SYSTEM_STATS_SCHEMA",
+                "device entry must be an object",
+                field,
+            )
         result_devices.append(
             {
-                "name": _clean_text(item.get("name"), f"{field}.name", maximum=512),
-                "type": _clean_text(item.get("type"), f"{field}.type", maximum=64),
-                "index": _bounded_integer(item.get("index"), f"{field}.index", nullable=True),
-                "vram_total": _bounded_integer(item.get("vram_total"), f"{field}.vram_total"),
-                "vram_free": _bounded_integer(item.get("vram_free"), f"{field}.vram_free"),
+                "name": _clean_text(
+                    item.get("name"),
+                    f"{field}.name",
+                    maximum=512,
+                ),
+                "type": _clean_text(
+                    item.get("type"),
+                    f"{field}.type",
+                    maximum=64,
+                ),
+                "index": _bounded_integer(
+                    item.get("index"),
+                    f"{field}.index",
+                    nullable=True,
+                ),
+                "vram_total": _bounded_integer(
+                    item.get("vram_total"),
+                    f"{field}.vram_total",
+                ),
+                "vram_free": _bounded_integer(
+                    item.get("vram_free"),
+                    f"{field}.vram_free",
+                ),
             }
         )
     return {
@@ -158,7 +225,9 @@ def _checkpoint_set(value: list[Any]) -> set[str]:
 
 
 def _workflow_classes(workflow: dict[str, Any]) -> list[str]:
-    classes = sorted({str(node["class_type"]) for node in workflow.values()})
+    classes = sorted(
+        {str(node["class_type"]) for node in workflow.values()}
+    )
     if not classes or len(classes) > MAX_NODE_CLASSES:
         raise AdapterError(
             "NODE_CLASS_LIMIT",
@@ -187,10 +256,19 @@ def run_preflight(
         bundle = checked["bundle"]
         endpoint = sanitize_loopback_endpoint(bundle["endpoint"])
         package = manifest_path.expanduser().resolve(strict=True).parent
-        request, _request_bytes = _load_canonical(package / REQUEST_FILE, REQUEST_FILE)
-        workflow, _workflow_bytes, _workflow_path, _summary = _load_workflow(package / WORKFLOW_FILE)
+        request, _request_bytes = _load_canonical(
+            package / REQUEST_FILE,
+            REQUEST_FILE,
+        )
+        workflow, _workflow_bytes, _workflow_path, _summary = _load_workflow(
+            package / WORKFLOW_FILE
+        )
         config = request.get("config")
-        checkpoint_name = config.get("checkpoint_name") if isinstance(config, dict) else None
+        checkpoint_name = (
+            config.get("checkpoint_name")
+            if isinstance(config, dict)
+            else None
+        )
         if (
             not isinstance(checkpoint_name, str)
             or not checkpoint_name
@@ -204,7 +282,9 @@ def run_preflight(
                 "config.checkpoint_name",
             )
         class_types = _workflow_classes(workflow)
-        limits = PreflightHttpLimits(request_timeout_seconds=timeout_seconds)
+        limits = PreflightHttpLimits(
+            request_timeout_seconds=timeout_seconds
+        )
     except (AdapterError, SmokeError, OSError) as exc:
         return _failed(exc, network_contacted=False)
 
@@ -219,7 +299,10 @@ def run_preflight(
             if not response:
                 missing_classes.append(node_class)
                 continue
-            if set(response) != {node_class} or not isinstance(response.get(node_class), dict):
+            if (
+                set(response) != {node_class}
+                or not isinstance(response.get(node_class), dict)
+            ):
                 raise AdapterError(
                     "OBJECT_INFO_SCHEMA",
                     "object-info response must contain exactly the requested node class",
@@ -239,7 +322,10 @@ def run_preflight(
         diagnostics.append(
             {
                 "code": "CHECKPOINT_MISSING",
-                "message": f"required checkpoint is not installed: {checkpoint_name}",
+                "message": (
+                    "required checkpoint is not installed: "
+                    + checkpoint_name
+                ),
                 "field": "config.checkpoint_name",
             }
         )
@@ -247,11 +333,20 @@ def run_preflight(
         diagnostics.append(
             {
                 "code": "NODE_CLASSES_MISSING",
-                "message": "required node classes are unavailable: " + ", ".join(missing_classes),
+                "message": (
+                    "required node classes are unavailable: "
+                    + ", ".join(missing_classes)
+                ),
                 "field": "workflow.class_types",
             }
         )
-    diagnostics.sort(key=lambda item: (item["code"], item["field"], item["message"]))
+    diagnostics.sort(
+        key=lambda item: (
+            item["code"],
+            item["field"],
+            item["message"],
+        )
+    )
     ready = not diagnostics
     return {
         "ok": ready,
@@ -279,7 +374,9 @@ def run_preflight(
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m ai_illustration.comfyui_preflight")
+    parser = argparse.ArgumentParser(
+        prog="python -m ai_illustration.comfyui_preflight"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run")
     run.add_argument("manifest", type=Path)
