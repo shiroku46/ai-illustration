@@ -14,15 +14,19 @@ permissions:
 
 jobs:
   test:
-    name: test (${{ matrix.os }})
+    name: test (${{ matrix.os }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
+        include:
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.14"
     env:
       TARGET_REF: ${{ inputs.target_ref || github.event.pull_request.head.sha }}
     steps:
@@ -32,7 +36,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
       - name: Run Foundation source tests or validate generated target
         shell: bash
         run: |
