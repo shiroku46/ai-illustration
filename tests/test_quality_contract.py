@@ -29,6 +29,7 @@ class QualityContractTests(unittest.TestCase):
             "candidate_request_ref": "request-one",
             "candidate_sha256": "a" * 64,
             "decision": "accept",
+            "reviewer": "owner",
             "review_scope": "creative",
             "resulting_quality_stage": CREATIVE_CANDIDATE,
             "hard_fail_categories": [],
@@ -66,6 +67,10 @@ class QualityContractTests(unittest.TestCase):
         self.assert_gate_code("STALE_REVIEW", review={**self.review, "candidate_ref": "candidate-two"})
         self.assert_gate_code("STALE_REVIEW", review={**self.review, "candidate_request_ref": "request-two"})
         self.assert_gate_code("STALE_REVIEW", review={**self.review, "candidate_sha256": "b" * 64})
+
+    def test_missing_checksum_or_reviewer_is_rejected(self) -> None:
+        self.assert_gate_code("CHECKSUM", candidate={**self.candidate, "sha256": None})
+        self.assert_gate_code("REVIEWER_REQUIRED", review={**self.review, "reviewer": ""})
 
     def test_hard_fail_categories_are_fail_closed(self) -> None:
         self.assert_gate_code(
