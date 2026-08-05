@@ -9,6 +9,7 @@ The repository implements the complete software path from approved local generat
 - deterministic manifest and provenance validation;
 - local tool/model evidence, compatibility, licensing, and installation profiles;
 - fixed-seed ComfyUI workflow planning;
+- deterministic inspection and preparation of owner-exported ComfyUI API workflows;
 - explicit strict-loopback ComfyUI execution with deterministic candidate packaging;
 - local candidate comparison and structured human review;
 - reviewed expression/pose variant planning;
@@ -54,6 +55,27 @@ PYTHONPATH=src python -m ai_illustration.cli adapter-plan \
   path/to/workflow-api.json \
   --bindings path/to/bindings.json
 ```
+
+### ComfyUI smoke-test bundle preparation
+
+An owner-exported API-format workflow can be inspected and converted into a deterministic bundle for the existing executor:
+
+```bash
+PYTHONPATH=src python -m ai_illustration.comfyui_smoke inspect \
+  path/to/workflow-api.json
+
+PYTHONPATH=src python -m ai_illustration.comfyui_smoke prepare \
+  path/to/workflow-api.json \
+  --output-root path/to/smoke-bundles \
+  --review-date 2026-08-05 \
+  --write
+
+PYTHONPATH=src python -m ai_illustration.comfyui_smoke check \
+  path/to/smoke-bundles/BUNDLE-ID/smoke-bundle-manifest.json \
+  --output-root path/to/smoke-bundles
+```
+
+Preparation is offline and defaults to `reviewing`. It never infers tool or model license approval. An execution-ready bundle requires real owner-reviewed evidence URLs, a review date, and separate explicit acknowledgements for the installed tool, exact model, and commercial-use review. See `docs/COMFYUI_SMOKE_TEST.md` for the Windows PowerShell flow from Comfy Desktop API export through generated-package checking.
 
 Actual generation requires explicit approved request/tool/model/execution profiles, an already-running local ComfyUI instance, and `--execute`:
 
