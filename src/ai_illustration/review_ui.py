@@ -14,6 +14,16 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from .models import Manifest, load_manifest
+from .quality import (
+    CREATIVE_CANDIDATE,
+    HARD_FAIL_CATEGORIES,
+    PACKAGED_QUALITY_STAGES,
+    REVIEW_SCOPES,
+    TECHNICAL_CANDIDATE,
+    QualityGateError,
+    normalized_hard_fail_categories,
+    require_creative_candidate,
+)
 from .validation import _parse_png, validate_document
 
 REVIEW_CATEGORIES = (
@@ -53,6 +63,8 @@ class ReviewData:
         return {
             "ok": True,
             "categories": list(REVIEW_CATEGORIES),
+            "hard_fail_categories": list(HARD_FAIL_CATEGORIES),
+            "review_scopes": sorted(REVIEW_SCOPES),
             "decisions": sorted(DECISIONS),
             "candidates": [item.payload for item in self.candidates],
         }
@@ -133,6 +145,7 @@ def _validated_prior_reviews(
     reviews: dict[str, list[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
     prior = reviews.get(candidate_id, [])
+    quality_fields = {"review_scope", "resulting_quality_stage", "hard_fail_categories"}
     for review in prior:
         if review.get("candidate_request_ref") != request_id:
             raise ReviewUIError(f"review {review.get('id', '')} does not bind the current source request")
@@ -140,6 +153,41 @@ def _validated_prior_reviews(
             raise ReviewUIError(f"review {review.get('id', '')} does not bind the current candidate checksum")
         if review.get("decision") in {"accept", "shortlist"} and candidate.get("status") != "technically_valid":
             raise ReviewUIError(f"review {review.get('id', '')} approves a candidate that is not technically valid")
+
+        present_quality_fields = quality_fields & set(review)
+        if not present_quality_fields:
+            continue
+        if present_quality_fields != quality_fields:
+            raise ReviewUIError(f"review {review.get('id', '')} has an incomplete quality decision")
+        try:
+            hard_fails = normalized_hard_fail_categories(review.get("hard_fail_categories"))
+        except QualityGateError as exc:
+            raise ReviewUIError(f"review {review.get('id', '')} has invalid hard-fail data: {exc}") from exc
+        stage = candidate.get("quality_stage")
+        scope = review.get("review_scope")
+        decision = review.get("decision")
+        if scope == "creative":
+            if stage != TECHNICAL_CANDIDATE:
+                raise ReviewUIError(
+                    f"review {review.get('id', '')} applies creative scope to a non-technical candidate"
+                )
+            expected_stage = CREATIVE_CANDIDATE if decision == "accept" else stage
+        else:
+            expected_stage = stage
+        if review.get("resulting_quality_stage") != expected_stage:
+            raise ReviewUIError(f"review {review.get('id', '')} has an invalid resulting quality stage")
+        if scope == "creative" and decision == "accept":
+            try:
+                require_creative_candidate(
+                    candidate,
+                    review,
+                    request_id=request_id,
+                    candidate_id=candidate_id,
+                )
+            except QualityGateError as exc:
+                raise ReviewUIError(f"review {review.get('id', '')} fails the creative gate: {exc}") from exc
+        elif decision == "accept" and hard_fails and scope == "creative":
+            raise ReviewUIError(f"review {review.get('id', '')} cannot accept creative hard failures")
     return sorted(prior, key=lambda item: (str(item.get("timestamp", "")), str(item.get("id", ""))))
 
 
@@ -179,18 +227,36 @@ def load_review_data(manifest_root: Path, asset_root: Path) -> ReviewData:
             raise ReviewUIError(f"request {request.manifest_id} references a mismatched character version")
         prior = _validated_prior_reviews(candidate_id, candidate, request_id, reviews)
         available = _verified_asset_bytes(asset_root, candidate) is not None
+        latest = prior[-1] if prior else None
         payload = {
-            "id": candidate_id, "request_id": request.manifest_id, "character_id": character_id,
-            "character_version": character_version, "role": character.data.get("role"),
-            "pose": request.data.get("pose"), "expression": request.data.get("expression"),
-            "crop": request.data.get("crop"), "facing": request.data.get("facing"),
-            "tool_id": request.data.get("tool_id"), "model_id": request.data.get("model_id"),
-            "license_status": request.data.get("license_status"), "candidate_status": candidate.get("status"),
-            "sha256": candidate.get("sha256"), "width": candidate.get("width"), "height": candidate.get("height"),
-            "color_space": candidate.get("color_space"), "has_alpha": candidate.get("has_alpha"),
-            "provenance": candidate.get("provenance"), "image_available": available,
-            "image_url": f"/assets/{candidate_id}" if available else None, "reviews": prior,
-            "review_state": prior[-1]["decision"] if prior else "unreviewed",
+            "id": candidate_id,
+            "request_id": request.manifest_id,
+            "character_id": character_id,
+            "character_version": character_version,
+            "role": character.data.get("role"),
+            "pose": request.data.get("pose"),
+            "expression": request.data.get("expression"),
+            "crop": request.data.get("crop"),
+            "facing": request.data.get("facing"),
+            "tool_id": request.data.get("tool_id"),
+            "model_id": request.data.get("model_id"),
+            "license_status": request.data.get("license_status"),
+            "candidate_status": candidate.get("status"),
+            "technical_status": candidate.get("status"),
+            "quality_stage": candidate.get("quality_stage"),
+            "sha256": candidate.get("sha256"),
+            "width": candidate.get("width"),
+            "height": candidate.get("height"),
+            "color_space": candidate.get("color_space"),
+            "has_alpha": candidate.get("has_alpha"),
+            "provenance": candidate.get("provenance"),
+            "image_available": available,
+            "image_url": f"/assets/{candidate_id}" if available else None,
+            "reviews": prior,
+            "review_state": latest["decision"] if latest else "unreviewed",
+            "review_scope": latest.get("review_scope") if latest else None,
+            "review_resulting_quality_stage": latest.get("resulting_quality_stage") if latest else None,
+            "review_hard_fail_categories": latest.get("hard_fail_categories", []) if latest else [],
         }
         candidates.append(CandidateView(payload, asset_root, dict(candidate)))
     candidates.sort(key=lambda item: item.payload["id"])
@@ -200,18 +266,36 @@ def load_review_data(manifest_root: Path, asset_root: Path) -> ReviewData:
 def make_review_decision(
     candidate: CandidateView | dict[str, Any], *, decision: str, reviewer: str,
     categories: list[str], notes: str = "", timestamp: str | None = None,
+    review_scope: str = "technical", hard_fail_categories: list[str] | None = None,
 ) -> dict[str, Any]:
     if decision not in DECISIONS:
         raise ReviewUIError("unsupported review decision")
+    if review_scope not in REVIEW_SCOPES:
+        raise ReviewUIError("review_scope must be technical or creative")
     payload = candidate.payload if isinstance(candidate, CandidateView) else candidate
-    if decision in {"accept", "shortlist"}:
+    stage = payload.get("quality_stage")
+    if stage not in PACKAGED_QUALITY_STAGES:
+        raise ReviewUIError("an explicit packaged quality_stage is required before review")
+    try:
+        hard_fails = list(normalized_hard_fail_categories(hard_fail_categories or []))
+    except QualityGateError as exc:
+        raise ReviewUIError(str(exc)) from exc
+
+    requires_live = review_scope == "creative" or decision in {"accept", "shortlist"}
+    if requires_live:
         if not isinstance(candidate, CandidateView):
-            raise ReviewUIError("accept and shortlist require a live CandidateView")
+            raise ReviewUIError("this review requires a live CandidateView")
         verified_bytes = candidate.read_verified_asset()
         if verified_bytes is None or hashlib.sha256(verified_bytes).hexdigest() != payload.get("sha256"):
-            raise ReviewUIError("accept and shortlist require a live verified image matching the candidate checksum")
+            raise ReviewUIError("this review requires a live verified image matching the candidate checksum")
         if payload.get("candidate_status") != "technically_valid":
-            raise ReviewUIError("accept and shortlist require a technically_valid candidate")
+            raise ReviewUIError("this review requires a technically_valid candidate")
+    if review_scope == "creative":
+        if stage != TECHNICAL_CANDIDATE:
+            raise ReviewUIError("creative review is allowed only for technical_candidate assets")
+        if decision == "accept" and hard_fails:
+            raise ReviewUIError("creative accept cannot contain hard-fail categories")
+
     if not reviewer or not reviewer.strip():
         raise ReviewUIError("reviewer is required")
     if any(item not in REVIEW_CATEGORIES for item in categories):
@@ -219,20 +303,64 @@ def make_review_decision(
     timestamp = timestamp or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     if not UTC_RE.fullmatch(timestamp):
         raise ReviewUIError("timestamp must be UTC YYYY-MM-DDTHH:MM:SSZ")
-    candidate_id, request_id, checksum = str(payload["id"]), str(payload["request_id"]), str(payload["sha256"])
+    candidate_id = str(payload["id"])
+    request_id = str(payload["request_id"])
+    checksum = str(payload["sha256"])
     if not ID_RE.fullmatch(candidate_id) or not ID_RE.fullmatch(request_id):
         raise ReviewUIError("candidate/request ids are invalid")
-    suffix = hashlib.sha256(f"{candidate_id}\n{decision}\n{timestamp}\n{checksum}".encode()).hexdigest()[:12]
+
+    normalized_categories = sorted(set(categories))
+    resulting_stage = (
+        CREATIVE_CANDIDATE
+        if review_scope == "creative" and decision == "accept"
+        else stage
+    )
+    identity = "\n".join([
+        candidate_id,
+        request_id,
+        checksum,
+        reviewer.strip(),
+        decision,
+        review_scope,
+        resulting_stage,
+        timestamp,
+        ",".join(normalized_categories),
+        ",".join(hard_fails),
+    ])
+    suffix = hashlib.sha256(identity.encode()).hexdigest()[:12]
     output: dict[str, Any] = {
-        "kind": "review-decision", "schema_version": "1.0", "id": f"review-{candidate_id}-{suffix}",
-        "candidate_ref": candidate_id, "candidate_request_ref": request_id, "candidate_sha256": checksum,
-        "decision": decision, "reviewer": reviewer.strip(), "timestamp": timestamp,
-        "categories": sorted(set(categories)),
+        "kind": "review-decision",
+        "schema_version": "1.0",
+        "id": f"review-{candidate_id}-{suffix}",
+        "candidate_ref": candidate_id,
+        "candidate_request_ref": request_id,
+        "candidate_sha256": checksum,
+        "decision": decision,
+        "reviewer": reviewer.strip(),
+        "timestamp": timestamp,
+        "categories": normalized_categories,
+        "review_scope": review_scope,
+        "resulting_quality_stage": resulting_stage,
+        "hard_fail_categories": hard_fails,
     }
     if notes.strip():
         output["notes"] = notes.strip()
-    if validate_document(Manifest(Path("download.json"), output)):
-        raise ReviewUIError("generated review decision did not validate")
+    diagnostics = validate_document(Manifest(Path("download.json"), output))
+    if diagnostics:
+        first = diagnostics[0]
+        raise ReviewUIError(f"generated review decision did not validate: {first.code}")
+    if review_scope == "creative" and decision == "accept":
+        if not isinstance(candidate, CandidateView):
+            raise ReviewUIError("creative accept requires a live CandidateView")
+        try:
+            require_creative_candidate(
+                candidate.asset_spec,
+                output,
+                request_id=request_id,
+                candidate_id=candidate_id,
+            )
+        except QualityGateError as exc:
+            raise ReviewUIError(str(exc)) from exc
     return output
 
 
