@@ -18,7 +18,7 @@ from .comfyui_execution_common import (
     source_file,
     token,
 )
-from ..frame_renderer import decode_rgba_png
+from .comfyui_png import decode_comfyui_png
 from ..naming import content_identifier, safe_relative_path
 
 
@@ -86,7 +86,7 @@ def history_outputs(history: dict[str, Any], prompt_id: str, nodes: list[str], m
 
 def candidate_files(plan: dict[str, Any], prompt_id: str, descriptor: dict[str, str], png: bytes, index: int) -> tuple[dict[str, Any], bytes, str, bytes]:
     try:
-        image = decode_rgba_png(png, expected_width=plan["expected_width"], expected_height=plan["expected_height"])
+        image = decode_comfyui_png(png, expected_width=plan["expected_width"], expected_height=plan["expected_height"])
     except Exception as exc:
         raise AdapterError("PNG_INVALID", str(exc), descriptor["filename"]) from exc
     png_sha = sha256(png)
@@ -110,7 +110,7 @@ def candidate_files(plan: dict[str, Any], prompt_id: str, descriptor: dict[str, 
         "width": image.width,
         "height": image.height,
         "color_space": "sRGB",
-        "has_alpha": True,
+        "has_alpha": image.has_alpha,
         "media_type": "image/png",
         "status": "technically_valid",
         "provenance": {
@@ -234,7 +234,7 @@ def check_execution_package(manifest_path: Path, expected_plan: dict[str, Any]) 
         if sha256(png) != item["sha256"] or len(png) != declared_size:
             raise AdapterError("CANDIDATE_BYTES", "candidate PNG checksum or size changed", png_rel)
         try:
-            decode_rgba_png(png, expected_width=plan["expected_width"], expected_height=plan["expected_height"])
+            decode_comfyui_png(png, expected_width=plan["expected_width"], expected_height=plan["expected_height"])
         except Exception as exc:
             raise AdapterError("PNG_INVALID", str(exc), png_rel) from exc
         expected_sidecar, expected_sidecar_bytes, _, _ = candidate_files(
