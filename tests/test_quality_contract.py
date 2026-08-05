@@ -61,6 +61,8 @@ class QualityContractTests(unittest.TestCase):
 
     def test_technical_or_stale_review_is_rejected(self) -> None:
         self.assert_gate_code("CREATIVE_REVIEW_REQUIRED", review={**self.review, "review_scope": "technical"})
+        self.assert_gate_code("STALE_REVIEW", candidate={**self.candidate, "id": "candidate-two"})
+        self.assert_gate_code("STALE_REVIEW", candidate={**self.candidate, "request_ref": "request-two"})
         self.assert_gate_code("STALE_REVIEW", review={**self.review, "candidate_ref": "candidate-two"})
         self.assert_gate_code("STALE_REVIEW", review={**self.review, "candidate_request_ref": "request-two"})
         self.assert_gate_code("STALE_REVIEW", review={**self.review, "candidate_sha256": "b" * 64})
