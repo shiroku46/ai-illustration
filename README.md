@@ -10,6 +10,7 @@ The repository implements the complete software path from approved local generat
 - local tool/model evidence, compatibility, licensing, and installation profiles;
 - fixed-seed ComfyUI workflow planning;
 - deterministic inspection and preparation of owner-exported ComfyUI API workflows;
+- strict non-generating ComfyUI node/checkpoint readiness preflight;
 - explicit strict-loopback ComfyUI execution with deterministic candidate packaging;
 - local candidate comparison and structured human review;
 - reviewed expression/pose variant planning;
@@ -76,6 +77,18 @@ PYTHONPATH=src python -m ai_illustration.comfyui_smoke check \
 ```
 
 Preparation is offline and defaults to `reviewing`. It never infers tool or model license approval. An execution-ready bundle requires real owner-reviewed evidence URLs, a review date, and separate explicit acknowledgements for the installed tool, exact model, and commercial-use review. See `docs/COMFYUI_SMOKE_TEST.md` for the Windows PowerShell flow from Comfy Desktop API export through generated-package checking.
+
+### Non-generating ComfyUI preflight
+
+After an approved bundle passes its offline checker and ComfyUI is running, verify that the exact node classes and checkpoint exist before queueing a prompt:
+
+```bash
+PYTHONPATH=src python -m ai_illustration.comfyui_preflight run \
+  path/to/smoke-bundles/BUNDLE-ID/smoke-bundle-manifest.json \
+  --bundle-root path/to/smoke-bundles
+```
+
+The preflight allows bounded GET requests only to local system stats, the checkpoint list, and individual object-info routes for exact workflow classes. It never calls `/prompt`, retrieves images, starts a process, changes a queue, or writes files. See `docs/COMFYUI_PREFLIGHT.md`.
 
 Actual generation requires explicit approved request/tool/model/execution profiles, an already-running local ComfyUI instance, and `--execute`:
 
