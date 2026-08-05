@@ -1,0 +1,28 @@
+{
+  "audit": {
+    "alternative_connected_paths": "trusted-checks.yml:active:325412905;ci-reconcile.yml:active:325412899;supervisor.yml:active:325412904;claude-queue.yml:active:325412902",
+    "changed_and_renamed_paths": "[\"src/ai_illustration/adapters/comfyui_execution_package.py\",\"src/ai_illustration/adapters/comfyui_png.py\",\"tests/test_comfyui_png.py\"]",
+    "check_evidence": "[{\"app\":\"github-actions\",\"conclusion\":\"success\",\"name\":\"test (ubuntu-latest, Python 3.12)\",\"status\":\"completed\"},{\"app\":\"github-actions\",\"conclusion\":\"success\",\"name\":\"test (windows-latest, Python 3.12)\",\"status\":\"completed\"},{\"app\":\"github-actions\",\"conclusion\":\"success\",\"name\":\"test (windows-latest, Python 3.14)\",\"status\":\"completed\"},{\"app\":\"github-actions\",\"conclusion\":\"success\",\"name\":\"validate\",\"status\":\"completed\"}]",
+    "exact_head_sha": "4d34b1f3d527d1e29046ac47aca30a85b8c4d57e",
+    "human_only_connected_evidence": "not-applicable",
+    "idempotency": "automation-stops/pr-54/4d34b1f3d527d1e29046ac47aca30a85b8c4d57e/UNAUTHORIZED_CHANGED_PATH.json",
+    "issue": "#53",
+    "mergeability": "mergeable=None,mergeable_state=unknown",
+    "native_pull_request_workflow_evidence": "{\"clean\":false,\"runs\":[]}",
+    "permissions_and_credentials": "automation_owner_permission=admin,secret_values_not_requested=true",
+    "pull_request": "#54",
+    "reason_code": "UNAUTHORIZED_CHANGED_PATH",
+    "repository_metadata": "visibility=public,default_branch=main,initial_and_final_head_confirmed=true",
+    "review_and_provenance": "codex=pending,codex_timestamp=None,trusted_request_timestamp=None,unresolved_threads=False",
+    "scope_and_authorization": "issue=state=closed,trusted_author=True,authorization=all_paths=False,protected_paths=True",
+    "workflow_run_and_job_evidence": "[]"
+  },
+  "detail": "Changed or renamed paths exceed the trusted Issue allowlist.",
+  "exact_head_sha": "4d34b1f3d527d1e29046ac47aca30a85b8c4d57e",
+  "issue_number": 53,
+  "notification": false,
+  "pull_request_number": 54,
+  "reason_code": "UNAUTHORIZED_CHANGED_PATH",
+  "required_human_action": null,
+  "schema_version": 1
+}
