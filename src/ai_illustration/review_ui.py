@@ -160,7 +160,7 @@ def _validated_prior_reviews(
         if present_quality_fields != quality_fields:
             raise ReviewUIError(f"review {review.get('id', '')} has an incomplete quality decision")
         try:
-            hard_fails = normalized_hard_fail_categories(review.get("hard_fail_categories"))
+            normalized_hard_fail_categories(review.get("hard_fail_categories"))
         except QualityGateError as exc:
             raise ReviewUIError(f"review {review.get('id', '')} has invalid hard-fail data: {exc}") from exc
         stage = candidate.get("quality_stage")
@@ -186,8 +186,6 @@ def _validated_prior_reviews(
                 )
             except QualityGateError as exc:
                 raise ReviewUIError(f"review {review.get('id', '')} fails the creative gate: {exc}") from exc
-        elif decision == "accept" and hard_fails and scope == "creative":
-            raise ReviewUIError(f"review {review.get('id', '')} cannot accept creative hard failures")
     return sorted(prior, key=lambda item: (str(item.get("timestamp", "")), str(item.get("id", ""))))
 
 
