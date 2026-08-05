@@ -9,7 +9,11 @@ import unittest
 import zlib
 
 from ai_illustration.adapters.base import AdapterError
-from ai_illustration.adapters.comfyui_execution_common import MANIFEST_FILE, PLAN_FILE, json_bytes
+from ai_illustration.adapters.comfyui_execution_common import (
+    MANIFEST_FILE as EXECUTION_MANIFEST_FILE,
+    PLAN_FILE,
+    json_bytes,
+)
 from ai_illustration.adapters.comfyui_execution_package import (
     candidate_files,
     check_execution_package,
@@ -17,6 +21,7 @@ from ai_illustration.adapters.comfyui_execution_package import (
 )
 from ai_illustration.comfyui_smoke_bundle import REQUEST_FILE, prepare_bundle
 from ai_illustration.comfyui_smoke_check import check_bundle
+from ai_illustration.comfyui_smoke_common import MANIFEST_FILE as SMOKE_MANIFEST_FILE
 from ai_illustration.models import Manifest
 from ai_illustration.quality import TECHNICAL_CANDIDATE, TRANSPORT_SMOKE_OUTPUT
 from ai_illustration.validation import validate_document
@@ -115,7 +120,7 @@ class QualityPackagingTests(unittest.TestCase):
             package = output_root / result["bundle_path"]
             request = json.loads((package / REQUEST_FILE).read_text(encoding="utf-8"))
             self.assertEqual(request["output_intent"], "transport-smoke")
-            self.assertTrue(check_bundle(package / MANIFEST_FILE, output_root)["ok"])
+            self.assertTrue(check_bundle(package / SMOKE_MANIFEST_FILE, output_root)["ok"])
 
     def test_smoke_normal_and_legacy_sidecars_keep_technical_status_separate(self) -> None:
         payload = rgba_png()
@@ -184,6 +189,7 @@ class QualityPackagingTests(unittest.TestCase):
             sidecar_path: sidecar_bytes,
             png_path: png_bytes,
         }
+        current_descriptor = descriptor()
         inventory = [{
             "id": sidecar["id"],
             "path": png_path,
@@ -192,9 +198,9 @@ class QualityPackagingTests(unittest.TestCase):
             "size": len(png_bytes),
             "width": sidecar["width"],
             "height": sidecar["height"],
-            "output_node_id": descriptor()["node_id"],
-            "server_filename": descriptor()["filename"],
-            "server_subfolder": descriptor()["subfolder"],
+            "output_node_id": current_descriptor["node_id"],
+            "server_filename": current_descriptor["filename"],
+            "server_subfolder": current_descriptor["subfolder"],
             "index": 0,
         }]
         manifest = execution_manifest(
@@ -207,9 +213,9 @@ class QualityPackagingTests(unittest.TestCase):
                 target = package / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(contents)
-            (package / MANIFEST_FILE).write_bytes(json_bytes(manifest))
+            (package / EXECUTION_MANIFEST_FILE).write_bytes(json_bytes(manifest))
             self.assertEqual(
-                check_execution_package(package / MANIFEST_FILE, execution_plan),
+                check_execution_package(package / EXECUTION_MANIFEST_FILE, execution_plan),
                 manifest,
             )
             original = json.loads((package / sidecar_path).read_text(encoding="utf-8"))
@@ -221,7 +227,7 @@ class QualityPackagingTests(unittest.TestCase):
                     tampered["quality_stage"] = replacement
                 (package / sidecar_path).write_bytes(json_bytes(tampered))
                 with self.assertRaises(AdapterError) as raised:
-                    check_execution_package(package / MANIFEST_FILE, execution_plan)
+                    check_execution_package(package / EXECUTION_MANIFEST_FILE, execution_plan)
                 self.assertIn(
                     raised.exception.code,
                     {"SIDECAR_BINDING", "FILE_INVENTORY"},
