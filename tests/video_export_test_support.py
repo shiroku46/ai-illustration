@@ -23,6 +23,9 @@ from ai_illustration.video_export import (
     main,
     run_video_export,
 )
+from ai_illustration.video_export_source import (
+    _command_template as production_command_template,
+)
 
 
 def canonical(value: object) -> bytes:
@@ -31,6 +34,7 @@ def canonical(value: object) -> bytes:
 
 def sha(payload: bytes) -> str:
     import hashlib
+
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -44,10 +48,20 @@ def profile_value(*, crf: int = 18) -> dict:
         "alpha_policy": "require-opaque-source",
         "frame_policy": "exact-numbered-sequence-no-resize",
         "metadata_policy": "strip-input-and-fix-creation-time",
-        "video": {"codec": "libx264", "pixel_format": "yuv420p", "preset": "medium", "crf": crf},
+        "video": {
+            "codec": "libx264",
+            "pixel_format": "yuv420p",
+            "preset": "medium",
+            "crf": crf,
+        },
         "audio": {"codec": "aac", "bitrate_kbps": 192},
     }
-    return {"id": content_identifier("paper-theater-video-export-profile", core, 20), **core}
+    return {
+        "id": content_identifier(
+            "paper-theater-video-export-profile", core, 20
+        ),
+        **core,
+    }
 
 
 class VideoExportTestCase(unittest.TestCase):
@@ -77,25 +91,39 @@ class VideoExportTestCase(unittest.TestCase):
         ):
             root.mkdir(parents=True)
 
-        self.package_id = "paper-theater-frame-preview-package-11111111111111111111"
+        self.package_id = (
+            "paper-theater-frame-preview-package-11111111111111111111"
+        )
         self.package_dir = self.frame_preview_root / self.package_id
         (self.package_dir / "frames").mkdir(parents=True)
         (self.package_dir / "audio").mkdir()
-        opaque1 = encode_rgba_png(RGBAImage(2, 2, bytes([255, 0, 0, 255] * 4)))
-        opaque2 = encode_rgba_png(RGBAImage(2, 2, bytes([0, 255, 0, 255] * 4)))
+        opaque1 = encode_rgba_png(
+            RGBAImage(2, 2, bytes([255, 0, 0, 255] * 4))
+        )
+        opaque2 = encode_rgba_png(
+            RGBAImage(2, 2, bytes([0, 255, 0, 255] * 4))
+        )
         self.frame_payloads = [opaque1, opaque2]
         for index, payload in enumerate(self.frame_payloads):
-            (self.package_dir / f"frames/{index:08d}.png").write_bytes(payload)
+            (self.package_dir / f"frames/{index:08d}.png").write_bytes(
+                payload
+            )
         self.audio_payload = b"RIFF" + b"\0" * 124
         self.audio_relative = f"audio/{sha(self.audio_payload)}.wav"
-        (self.package_dir / self.audio_relative).write_bytes(self.audio_payload)
+        (self.package_dir / self.audio_relative).write_bytes(
+            self.audio_payload
+        )
         self.manifest = {
             "id": self.package_id,
             "kind": "paper-theater-frame-preview-package",
             "schema_version": "1.0",
             "intent": "evaluation",
             "audio_license_status": "reviewing",
-            "canvas": {"width": 2, "height": 2, "background_rgba": [0, 0, 0, 255]},
+            "canvas": {
+                "width": 2,
+                "height": 2,
+                "background_rgba": [0, 0, 0, 255],
+            },
             "scene_duration_ms": 1000,
             "fps_num": 2,
             "fps_den": 1,
@@ -112,26 +140,64 @@ class VideoExportTestCase(unittest.TestCase):
             },
             "files": [
                 *[
-                    {"path": f"frames/{index:08d}.png", "sha256": sha(payload), "size": len(payload)}
+                    {
+                        "path": f"frames/{index:08d}.png",
+                        "sha256": sha(payload),
+                        "size": len(payload),
+                    }
                     for index, payload in enumerate(self.frame_payloads)
                 ],
-                {"path": self.audio_relative, "sha256": sha(self.audio_payload), "size": len(self.audio_payload)},
+                {
+                    "path": self.audio_relative,
+                    "sha256": sha(self.audio_payload),
+                    "size": len(self.audio_payload),
+                },
             ],
         }
-        self.manifest_path = self.package_dir / "frame-preview-manifest.json"
+        self.manifest_path = (
+            self.package_dir / "frame-preview-manifest.json"
+        )
         self._write_manifest()
         self.profile = profile_value()
         self.profile_path = self.profile_root / "video-export-profile.json"
         self.profile_path.write_bytes(canonical(self.profile))
-        self.ffmpeg = self.base / "fake-ffmpeg"
-        self.ffmpeg.write_text(
-            f"#!{sys.executable}\nimport pathlib,sys\npathlib.Path(sys.argv[-1]).write_bytes(b'FAKE-MP4')\n",
-            encoding="utf-8",
+
+        # Use the running Python interpreter as the exact, checksum-bound test
+        # executable. A patched command template inserts ``-c`` before the
+        # production FFmpeg arguments, so the same tests execute on POSIX and
+        # Windows without relying on shebangs, chmod, PATHEXT, or a compiler.
+        self.ffmpeg = Path(sys.executable).resolve()
+        self.fake_program = (
+            "import pathlib,sys;"
+            "pathlib.Path(sys.argv[-1]).write_bytes(b'FAKE-MP4')"
         )
-        self.ffmpeg.chmod(self.ffmpeg.stat().st_mode | stat.S_IXUSR)
+        self.command_template_patcher = patch(
+            "ai_illustration.video_export_plan._command_template",
+            side_effect=self._test_command_template,
+        )
+        self.command_template_patcher.start()
 
     def tearDown(self) -> None:
+        self.command_template_patcher.stop()
         self.tmp.cleanup()
+
+    def set_fake_program(self, program: str) -> None:
+        self.fake_program = program
+
+    def _test_command_template(
+        self,
+        source: dict,
+        profile: dict,
+        audio_relative: str,
+        audio_filter: str,
+    ) -> list[str]:
+        production = production_command_template(
+            source,
+            profile,
+            audio_relative,
+            audio_filter,
+        )
+        return [production[0], "-c", self.fake_program, *production[1:]]
 
     def _write_manifest(self) -> None:
         self.manifest_path.write_bytes(canonical(self.manifest))
@@ -157,9 +223,15 @@ class VideoExportTestCase(unittest.TestCase):
         )
 
     def plan(self):
-        with patch("ai_illustration.video_export_source.check_frame_preview_package", return_value=self._checker_result()):
+        with patch(
+            "ai_illustration.video_export_source.check_frame_preview_package",
+            return_value=self._checker_result(),
+        ):
             return build_video_export_plan(*self._args())
 
     def execute(self, timeout=30):
-        with patch("ai_illustration.video_export_source.check_frame_preview_package", return_value=self._checker_result()):
+        with patch(
+            "ai_illustration.video_export_source.check_frame_preview_package",
+            return_value=self._checker_result(),
+        ):
             return run_video_export(*self._args(), timeout_seconds=timeout)
