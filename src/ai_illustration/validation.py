@@ -13,6 +13,14 @@ import zlib
 
 from .models import Diagnostic, Manifest, load_manifest
 from .naming import SHA256_RE, TOKEN_RE, VERSION_RE, export_paths, safe_relative_path
+from .quality import (
+    CREATIVE_CANDIDATE,
+    PACKAGED_QUALITY_STAGES,
+    QUALITY_STAGES,
+    REVIEW_SCOPES,
+    QualityGateError,
+    normalized_hard_fail_categories,
+)
 
 KINDS = {
     "character-spec", "style-profile", "generation-request",
@@ -58,6 +66,10 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     ),
 }
 OPTIONAL = {"seed", "notes", "supersedes", "observed_sha256", "tool_version"}
+QUALITY_OPTIONAL: dict[str, set[str]] = {
+    "candidate-asset": {"quality_stage"},
+    "review-decision": {"review_scope", "resulting_quality_stage", "hard_fail_categories"},
+}
 
 
 @dataclass(frozen=True)
@@ -88,7 +100,8 @@ def validate_document(manifest: Manifest) -> list[Diagnostic]:
     if kind not in KINDS:
         return [_diagnostic(manifest, "UNKNOWN_KIND", f"unsupported kind: {kind!r}", "kind")]
 
-    unknown = sorted(set(data) - set(REQUIRED[kind]) - OPTIONAL)
+    optional = OPTIONAL | QUALITY_OPTIONAL.get(kind, set())
+    unknown = sorted(set(data) - set(REQUIRED[kind]) - optional)
     if unknown:
         diagnostics.append(_diagnostic(
             manifest, "UNKNOWN_FIELD",
@@ -163,6 +176,14 @@ def validate_document(manifest: Manifest) -> list[Diagnostic]:
             diagnostics.append(_diagnostic(manifest, "MEDIA_TYPE", "media_type must be image/png", "media_type"))
         if data.get("status") not in {"received", "technically_valid", "invalid"}:
             diagnostics.append(_diagnostic(manifest, "CANDIDATE_STATUS", "invalid candidate status", "status"))
+        quality_stage = data.get("quality_stage")
+        if quality_stage is not None and quality_stage not in PACKAGED_QUALITY_STAGES:
+            diagnostics.append(_diagnostic(
+                manifest,
+                "QUALITY_STAGE",
+                "candidate quality_stage must be transport_smoke_output or technical_candidate",
+                "quality_stage",
+            ))
         provenance = data.get("provenance")
         if not isinstance(provenance, dict) or not _nonempty_text(provenance.get("source")):
             diagnostics.append(_diagnostic(manifest, "UNKNOWN_PROVENANCE", "provenance.source is required", "provenance"))
@@ -178,6 +199,51 @@ def validate_document(manifest: Manifest) -> list[Diagnostic]:
             diagnostics.append(_diagnostic(manifest, "CATEGORIES", "categories must be a list", "categories"))
         if not isinstance(data.get("candidate_sha256"), str) or not SHA256_RE.fullmatch(data.get("candidate_sha256", "")):
             diagnostics.append(_diagnostic(manifest, "CHECKSUM", "candidate_sha256 must be 64 lowercase hexadecimal characters", "candidate_sha256"))
+        quality_fields = {"review_scope", "resulting_quality_stage", "hard_fail_categories"}
+        present_quality_fields = quality_fields & set(data)
+        if present_quality_fields and present_quality_fields != quality_fields:
+            diagnostics.append(_diagnostic(
+                manifest,
+                "QUALITY_REVIEW_FIELDS",
+                "quality-aware review fields must be supplied together",
+            ))
+        elif present_quality_fields:
+            if data.get("review_scope") not in REVIEW_SCOPES:
+                diagnostics.append(_diagnostic(manifest, "REVIEW_SCOPE", "invalid review_scope", "review_scope"))
+            if data.get("resulting_quality_stage") not in QUALITY_STAGES:
+                diagnostics.append(_diagnostic(
+                    manifest,
+                    "QUALITY_STAGE",
+                    "invalid resulting_quality_stage",
+                    "resulting_quality_stage",
+                ))
+            try:
+                hard_fails = normalized_hard_fail_categories(data.get("hard_fail_categories"))
+            except QualityGateError as exc:
+                diagnostics.append(_diagnostic(manifest, exc.code, exc.message, exc.field))
+            else:
+                if data.get("decision") == "accept" and data.get("review_scope") == "creative":
+                    if data.get("resulting_quality_stage") != CREATIVE_CANDIDATE:
+                        diagnostics.append(_diagnostic(
+                            manifest,
+                            "QUALITY_STAGE",
+                            "creative accept must result in creative_candidate",
+                            "resulting_quality_stage",
+                        ))
+                    if hard_fails:
+                        diagnostics.append(_diagnostic(
+                            manifest,
+                            "CREATIVE_HARD_FAIL",
+                            "creative accept cannot contain hard-fail categories",
+                            "hard_fail_categories",
+                        ))
+                elif data.get("resulting_quality_stage") == CREATIVE_CANDIDATE:
+                    diagnostics.append(_diagnostic(
+                        manifest,
+                        "QUALITY_STAGE",
+                        "creative_candidate requires an explicit creative accept",
+                        "resulting_quality_stage",
+                    ))
 
     if kind == "export-manifest":
         if data.get("format") != "png":
@@ -189,7 +255,7 @@ def validate_document(manifest: Manifest) -> list[Diagnostic]:
         for field in ("crop", "facing", "pose", "expression"):
             value = data.get(field)
             if not isinstance(value, str) or not TOKEN_RE.fullmatch(value):
-                diagnostics.append(_diagnostic(manifest, "INVALID_TOKEN", "must be a lowercase ASCII token", field))
+                diagnostics.append(_diagnostic(manifest, "INVALID_TOKEN", "must be lowercase ASCII token", field))
         needed = ("character_ref", "crop", "facing", "pose", "expression", "version", "sha256", "path", "sidecar_path")
         if all(field in data for field in needed):
             try:
