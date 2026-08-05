@@ -9,6 +9,7 @@ from typing import Any
 
 from .models import Manifest
 from .naming import SHA256_RE, TOKEN_RE, canonical_json, content_identifier, safe_relative_path
+from .quality import QualityGateError, require_creative_candidate
 from .validation import _verify_png, load_path, validate_document
 
 INTENTS = {"evaluation", "production"}
@@ -135,12 +136,15 @@ def _source_context(
     reviews.sort(key=lambda item: (str(item.data.get("timestamp", "")), item.manifest_id))
     review = reviews[-1]
     rv = review.data
-    if rv.get("decision") != "accept":
-        raise VariantError("ACCEPT_REVIEW_REQUIRED", "latest review decision must be accept", "review_ref")
-    if rv.get("candidate_request_ref") != request.manifest_id:
-        raise VariantError("STALE_REVIEW", "review source request does not match candidate", "review_ref")
-    if rv.get("candidate_sha256") != c.get("sha256"):
-        raise VariantError("STALE_REVIEW", "review checksum does not match candidate", "review_ref")
+    try:
+        require_creative_candidate(
+            c,
+            rv,
+            request_id=request.manifest_id,
+            candidate_id=candidate_id,
+        )
+    except QualityGateError as exc:
+        raise VariantError(exc.code, exc.message, exc.field) from exc
 
     if intent == "production":
         approvals = {
