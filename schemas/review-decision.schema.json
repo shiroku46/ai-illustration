@@ -1,19 +1,50 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "dependentRequired": {
+    "hard_fail_categories": ["review_scope", "resulting_quality_stage"],
+    "resulting_quality_stage": ["review_scope", "hard_fail_categories"],
+    "review_scope": ["resulting_quality_stage", "hard_fail_categories"]
+  },
   "properties": {
     "candidate_ref": {},
     "candidate_request_ref": {"pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string"},
     "candidate_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
-    "categories": {},
-    "decision": {},
+    "categories": {"items": {"type": "string"}, "type": "array", "uniqueItems": true},
+    "decision": {"enum": ["shortlist", "accept", "reject", "needs_revision"], "type": "string"},
+    "hard_fail_categories": {
+      "items": {
+        "enum": [
+          "malformed_or_missing_limb",
+          "broken_joint_or_torso",
+          "incoherent_clothing",
+          "face_asymmetry",
+          "unintended_background",
+          "generic_ai_style",
+          "identity_drift",
+          "isolation_failure"
+        ],
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
     "id": {"pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string"},
     "kind": {"const": "review-decision"},
+    "notes": {"type": "string"},
+    "resulting_quality_stage": {
+      "enum": ["transport_smoke_output", "technical_candidate", "creative_candidate"],
+      "type": "string"
+    },
+    "review_scope": {"enum": ["technical", "creative"], "type": "string"},
     "reviewer": {},
     "schema_version": {"const": "1.0"},
     "timestamp": {}
   },
-  "required": ["kind", "schema_version", "id", "candidate_ref", "candidate_request_ref", "candidate_sha256", "decision", "reviewer", "timestamp", "categories"],
+  "required": [
+    "kind", "schema_version", "id", "candidate_ref", "candidate_request_ref",
+    "candidate_sha256", "decision", "reviewer", "timestamp", "categories"
+  ],
   "title": "review-decision",
   "type": "object"
 }
