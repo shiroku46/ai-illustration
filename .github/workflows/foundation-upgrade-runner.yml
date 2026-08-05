@@ -33,6 +33,7 @@ jobs:
       - name: Generate and verify exact upgrade payload
         env:
           GH_TOKEN: ${{ github.token }}
+          PRODUCT_WORKFLOW_B64: bmFtZTogUHJvZHVjdCBVbml0IFRlc3RzCgpvbjoKICBwdWxsX3JlcXVlc3Q6CgpwZXJtaXNzaW9uczoKICBjb250ZW50czogcmVhZAoKam9iczoKICBwcm9kdWN0LXRlc3RzOgogICAgbmFtZTogcHJvZHVjdC10ZXN0cyAoJHt7IG1hdHJpeC5vcyB9fSwgUHl0aG9uICR7eyBtYXRyaXgucHl0aG9uIH19KQogICAgcnVucy1vbjogJHt7IG1hdHJpeC5vcyB9fQogICAgdGltZW91dC1taW51dGVzOiAxNQogICAgc3RyYXRlZ3k6CiAgICAgIGZhaWwtZmFzdDogZmFsc2UKICAgICAgbWF0cml4OgogICAgICAgIGluY2x1ZGU6CiAgICAgICAgICAtIG9zOiB1YnVudHUtbGF0ZXN0CiAgICAgICAgICAgIHB5dGhvbjogIjMuMTIiCiAgICAgICAgICAtIG9zOiB3aW5kb3dzLWxhdGVzdAogICAgICAgICAgICBweXRob246ICIzLjEyIgogICAgICAgICAgLSBvczogd2luZG93cy1sYXRlc3QKICAgICAgICAgICAgcHl0aG9uOiAiMy4xNCIKICAgIHN0ZXBzOgogICAgICAtIHVzZXM6IGFjdGlvbnMvY2hlY2tvdXRAZGUwZmFjMmU0NTAwZGFiZTAwMDllNjcyMTRmZjVmNTQ0N2NlODNkZAogICAgICAgIHdpdGg6CiAgICAgICAgICByZWY6ICR7eyBnaXRodWIuZXZlbnQucHVsbF9yZXF1ZXN0LmhlYWQuc2hhIH19CiAgICAgICAgICBwZXJzaXN0LWNyZWRlbnRpYWxzOiBmYWxzZQogICAgICAtIHVzZXM6IGFjdGlvbnMvc2V0dXAtcHl0aG9uQGEzMDlmZjhiNDI2YjU4ZWMwZTJhNDVmMGY4NjlkNDY4ODlkMDI0MDUKICAgICAgICB3aXRoOgogICAgICAgICAgcHl0aG9uLXZlcnNpb246ICR7eyBtYXRyaXgucHl0aG9uIH19CiAgICAgIC0gbmFtZTogUnVuIGNvbXBsZXRlIHByb2R1Y3QgVW5pdCBUZXN0cwogICAgICAgIHNoZWxsOiBiYXNoCiAgICAgICAgcnVuOiBweXRob24gLW0gdW5pdHRlc3QgZGlzY292ZXIgLXMgdGVzdHMK
         run: |
           set -euo pipefail
           test "$(gh api "repos/$TARGET_REPOSITORY/commits/main" --jq .sha)" = "$BASE_SHA"
@@ -50,16 +51,15 @@ jobs:
           rm -f "$baseline/.github/workflows/foundation-upgrade-runner.yml"
           tar -C "$baseline" -cf - . | tar -xf - -C "$candidate"
           SOURCE_ROOT="$source_root" CANDIDATE_ROOT="$candidate" python - <<'PY'
+          import base64
           import json
           import os
           import sys
           from pathlib import Path
-
           source = Path(os.environ['SOURCE_ROOT'])
           target = Path(os.environ['CANDIDATE_ROOT'])
           sys.path.insert(0, str(source))
           from bootstrap.generator import MANAGED_FILES, PRESERVE_IF_PRESENT, TARGET_OWNED_FILES, render
-
           authorized = [
               path for path in MANAGED_FILES
               if (target / path).exists()
@@ -78,52 +78,16 @@ jobs:
           )
           if not plan.is_safe:
               raise SystemExit(f'unsafe Bootstrap plan: {plan.collisions}')
-
           config = {
-              'checks': [{
-                  'name': 'Product Unit Tests',
-                  'workflow': '.github/workflows/product-unit-tests.yml',
-              }],
+              'checks': [{'name': 'Product Unit Tests', 'workflow': '.github/workflows/product-unit-tests.yml'}],
               'schema_version': 1,
           }
           (target / '.github/foundation-product-checks.json').write_text(
               json.dumps(config, indent=2, sort_keys=True) + '\n', encoding='utf-8'
           )
-          (target / '.github/workflows/product-unit-tests.yml').write_text('''name: Product Unit Tests
-
-on:
-  pull_request:
-
-permissions:
-  contents: read
-
-jobs:
-  product-tests:
-    name: product-tests (${{ matrix.os }}, Python ${{ matrix.python }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            python: "3.12"
-          - os: windows-latest
-            python: "3.12"
-          - os: windows-latest
-            python: "3.14"
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
-        with:
-          python-version: ${{ matrix.python }}
-      - name: Run complete product Unit Tests
-        shell: bash
-        run: python -m unittest discover -s tests
-''', encoding='utf-8', newline='\n')
+          (target / '.github/workflows/product-unit-tests.yml').write_bytes(
+              base64.b64decode(os.environ['PRODUCT_WORKFLOW_B64'], validate=True)
+          )
           PY
           rm -f \
             "$candidate/scripts/ai_recovery_supervisor.py" \
@@ -150,7 +114,6 @@ jobs:
           import subprocess
           import sys
           from pathlib import Path
-
           source_root = Path(os.environ['SOURCE_ROOT'])
           baseline = Path(os.environ['BASELINE_ROOT'])
           candidate = Path(os.environ['CANDIDATE_ROOT'])
@@ -158,7 +121,6 @@ jobs:
           repo = os.environ['TARGET_REPOSITORY']
           sys.path.insert(0, str(source_root))
           from bootstrap.generator import MANAGED_FILES, PRESERVE_IF_PRESENT
-
           retired = {
               'scripts/ai_recovery_supervisor.py',
               'scripts/supervisor_final_guard.py',
@@ -168,8 +130,7 @@ jobs:
               'scripts/supervisor_queue_recovery_v3.py',
           }
           allowed = (set(MANAGED_FILES) - set(PRESERVE_IF_PRESENT)) | retired | {
-              'FOUNDATION.lock.json', 'INSTALL_CHECKLIST.md',
-              '.github/workflows/product-unit-tests.yml',
+              'FOUNDATION.lock.json', 'INSTALL_CHECKLIST.md', '.github/workflows/product-unit-tests.yml'
           }
           def inventory(root: Path):
               result = {}
@@ -180,7 +141,7 @@ jobs:
                       relative = path.relative_to(root).as_posix()
                       result[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
               return result
-          def gh_pages(path: str):
+          def pages(path: str):
               completed = subprocess.run(
                   ['gh', 'api', '--paginate', '--slurp', path],
                   text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
@@ -199,36 +160,27 @@ jobs:
           unexpected = sorted(all_changes - allowed)
           if unexpected:
               raise SystemExit(f'upgrade escaped authorized paths: {unexpected}')
-          for page in gh_pages(f'repos/{repo}/pulls?state=open&per_page=100'):
-              if not isinstance(page, list):
-                  raise SystemExit('open Pull Request page is malformed')
-              for pr in page:
+          for page in pages(f'repos/{repo}/pulls?state=open&per_page=100'):
+              for pr in page if isinstance(page, list) else []:
                   if not isinstance(pr, dict) or not isinstance(pr.get('number'), int):
                       continue
-                  number = pr['number']
                   paths = set()
-                  for files_page in gh_pages(f'repos/{repo}/pulls/{number}/files?per_page=100'):
-                      if not isinstance(files_page, list):
-                          raise SystemExit('Pull Request files page is malformed')
-                      for item in files_page:
+                  for files_page in pages(f'repos/{repo}/pulls/{pr["number"]}/files?per_page=100'):
+                      for item in files_page if isinstance(files_page, list) else []:
                           if isinstance(item, dict) and isinstance(item.get('filename'), str):
                               paths.add(item['filename'])
                           if isinstance(item, dict) and isinstance(item.get('previous_filename'), str):
                               paths.add(item['previous_filename'])
                   overlap = sorted(all_changes & paths)
                   if overlap:
-                      raise SystemExit(f'upgrade overlaps open PR #{number}: {overlap}')
+                      raise SystemExit(f'upgrade overlaps open PR #{pr["number"]}: {overlap}')
           entries = []
           for relative in changed:
               source = candidate / relative
               destination = payload / 'files' / relative
               destination.parent.mkdir(parents=True, exist_ok=True)
               shutil.copyfile(source, destination)
-              entries.append({
-                  'path': relative,
-                  'sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
-                  'size': source.stat().st_size,
-              })
+              entries.append({'path': relative, 'sha256': hashlib.sha256(source.read_bytes()).hexdigest(), 'size': source.stat().st_size})
           manifest = {
               'schema_version': 1,
               'repository': repo,
@@ -238,9 +190,7 @@ jobs:
               'deleted_paths': deleted,
               'human_action_required': False,
           }
-          (payload / 'manifest.json').write_text(
-              json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8'
-          )
+          (payload / 'manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8')
           print(json.dumps(manifest, indent=2, sort_keys=True))
           PY
           test "$(gh api "repos/$TARGET_REPOSITORY/commits/main" --jq .sha)" = "$BASE_SHA"
@@ -280,7 +230,6 @@ jobs:
           import os
           import subprocess
           from pathlib import Path
-
           repo = os.environ['REPOSITORY']
           payload = Path(os.environ['PAYLOAD_ROOT'])
           output = Path(os.environ['MAP_ROOT'])
@@ -293,16 +242,12 @@ jobs:
                   raise SystemExit(f'payload digest mismatch: {item["path"]}')
               completed = subprocess.run(
                   ['gh', 'api', '--method', 'POST', f'repos/{repo}/git/blobs', '--input', '-'],
-                  input=json.dumps({
-                      'content': base64.b64encode(raw).decode('ascii'),
-                      'encoding': 'base64',
-                  }, separators=(',', ':')),
+                  input=json.dumps({'content': base64.b64encode(raw).decode('ascii'), 'encoding': 'base64'}, separators=(',', ':')),
                   text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
               )
               if completed.returncode != 0:
                   raise SystemExit('GitHub blob request failed')
-              blob = json.loads(completed.stdout)
-              mapping.append({'path': item['path'], 'sha': blob['sha']})
+              mapping.append({'path': item['path'], 'sha': json.loads(completed.stdout)['sha']})
           result = {
               'schema_version': 1,
               'repository': repo,
@@ -311,9 +256,7 @@ jobs:
               'blobs': mapping,
               'deleted_paths': manifest['deleted_paths'],
           }
-          (output / 'blob-map.json').write_text(
-              json.dumps(result, indent=2, sort_keys=True) + '\n', encoding='utf-8'
-          )
+          (output / 'blob-map.json').write_text(json.dumps(result, indent=2, sort_keys=True) + '\n', encoding='utf-8')
           print(json.dumps(result, indent=2, sort_keys=True))
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
