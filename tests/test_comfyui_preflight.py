@@ -60,11 +60,7 @@ class Handler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _json(value: object) -> bytes:
-        return json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
+        return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
     def _send(
         self,
@@ -152,10 +148,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, self._json({"not": "a-list"}))
                 return
             if self.state.mode == "models-duplicate":
-                self._send(
-                    200,
-                    self._json(["same.safetensors", "same.safetensors"]),
-                )
+                self._send(200, self._json(["same.safetensors", "same.safetensors"]))
                 return
             self._send(200, self._json(self.state.checkpoints))
             return
@@ -167,24 +160,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.state.mode == "object-extra":
                 self._send(200, self._json({node_class: {}, "Unexpected": {}}))
                 return
-            if (
-                node_class == self.state.missing_node
-                or node_class not in self.state.node_classes
-            ):
+            if node_class == self.state.missing_node or node_class not in self.state.node_classes:
                 self._send(200, b"{}")
             else:
-                self._send(
-                    200,
-                    self._json(
-                        {
-                            node_class: {
-                                "name": node_class,
-                                "input": {},
-                                "output": [],
-                            }
-                        }
-                    ),
-                )
+                self._send(200, self._json({node_class: {"input": {}, "output": []}}))
             return
         self._send(404, b"{}")
 
@@ -233,18 +212,14 @@ class ComfyUIPreflightTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
-        self.workflow = self.root / "workflow-api.json"
-        self.workflow.write_text(
-            json.dumps(workflow(), indent=2),
-            encoding="utf-8",
-        )
+        self.source_root = self.root / "source"
+        self.source_root.mkdir()
+        self.workflow = self.source_root / "workflow-api.json"
+        self.workflow.write_text(json.dumps(workflow(), indent=2), encoding="utf-8")
         self.state = ServerState()
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.state = self.state  # type: ignore[attr-defined]
-        self.thread = threading.Thread(
-            target=self.server.serve_forever,
-            daemon=True,
-        )
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.endpoint = f"http://127.0.0.1:{self.server.server_address[1]}"
         self.bundles = self.root / "bundles"
@@ -280,19 +255,11 @@ class ComfyUIPreflightTests(unittest.TestCase):
                     "confirm_commercial_use": True,
                 }
             )
-        result = prepare_bundle(
-            workflow_path or self.workflow,
-            output_root,
-            **kwargs,
-        )
+        result = prepare_bundle(workflow_path or self.workflow, output_root, **kwargs)
         return output_root / str(result["bundle_path"]) / MANIFEST_FILE
 
     def preflight(self, *, timeout_seconds: float = 1.0) -> dict[str, object]:
-        return run_preflight(
-            self.manifest,
-            self.bundles,
-            timeout_seconds=timeout_seconds,
-        )
+        return run_preflight(self.manifest, self.bundles, timeout_seconds=timeout_seconds)
 
     def test_success_uses_only_exact_get_routes_and_sanitizes_output(self) -> None:
         result = self.preflight()
@@ -310,18 +277,14 @@ class ComfyUIPreflightTests(unittest.TestCase):
         self.assertEqual(result["requested_routes"], expected)
         self.assertEqual(self.state.posts, 0)
         rendered = json.dumps(result, sort_keys=True)
-        self.assertNotIn("argv", rendered)
-        self.assertNotIn("hidden", rendered)
-        self.assertNotIn(r"C:\Users", rendered)
+        for forbidden in ("argv", "hidden", r"C:\Users"):
+            self.assertNotIn(forbidden, rendered)
         self.assertFalse(result["prompt_queued"])
         self.assertFalse(result["filesystem_mutated"])
         self.assertFalse(result["external_process_started"])
 
     def test_proxy_environment_is_ignored(self) -> None:
-        previous = {
-            name: os.environ.get(name)
-            for name in ("HTTP_PROXY", "HTTPS_PROXY")
-        }
+        previous = {name: os.environ.get(name) for name in ("HTTP_PROXY", "HTTPS_PROXY")}
         os.environ["HTTP_PROXY"] = "http://127.0.0.1:1"
         os.environ["HTTPS_PROXY"] = "http://127.0.0.1:1"
         try:
@@ -334,7 +297,7 @@ class ComfyUIPreflightTests(unittest.TestCase):
                     os.environ[name] = value
 
     def test_reviewing_and_tampered_bundles_fail_before_network(self) -> None:
-        reviewing_root = self.root / "reviewing"
+        reviewing_root = self.root / "reviewing-bundles"
         reviewing = self._bundle("reviewing", reviewing_root)
         self.state.requests.clear()
         result = run_preflight(reviewing, reviewing_root)
@@ -345,10 +308,7 @@ class ComfyUIPreflightTests(unittest.TestCase):
         request = self.manifest.parent / REQUEST_FILE
         request.write_bytes(request.read_bytes() + b" ")
         result = self.preflight()
-        self.assertIn(
-            result["diagnostics"][0]["code"],
-            {"FILE_MISMATCH", "NONCANONICAL_JSON"},
-        )
+        self.assertIn(result["diagnostics"][0]["code"], {"FILE_MISMATCH", "NONCANONICAL_JSON"})
         self.assertFalse(result["network_contacted"])
         self.assertEqual(self.state.requests, [])
 
@@ -361,10 +321,7 @@ class ComfyUIPreflightTests(unittest.TestCase):
             [item["code"] for item in result["diagnostics"]],
             ["CHECKPOINT_MISSING", "NODE_CLASSES_MISSING"],
         )
-        self.assertEqual(
-            result["workflow"]["missing_node_classes"],
-            ["KSampler"],
-        )
+        self.assertEqual(result["workflow"]["missing_node_classes"], ["KSampler"])
         self.assertFalse(result["checkpoint"]["available"])
         self.assertEqual(self.state.posts, 0)
 
@@ -414,27 +371,22 @@ class ComfyUIPreflightTests(unittest.TestCase):
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
         probe.close()
-        unavailable_root = self.root / "unavailable"
+        unavailable_root = self.root / "unavailable-bundles"
         unavailable = self._bundle(
             "approved",
             unavailable_root,
             endpoint=f"http://127.0.0.1:{port}",
         )
-        result = run_preflight(
-            unavailable,
-            unavailable_root,
-            timeout_seconds=0.1,
-        )
-        self.assertIn(
-            result["diagnostics"][0]["code"],
-            {"HTTP_ERROR", "HTTP_TIMEOUT"},
-        )
+        result = run_preflight(unavailable, unavailable_root, timeout_seconds=0.1)
+        self.assertIn(result["diagnostics"][0]["code"], {"HTTP_ERROR", "HTTP_TIMEOUT"})
         self.assertTrue(result["network_contacted"])
 
     def test_unsafe_node_class_fails_before_network(self) -> None:
         unsafe = workflow()
         unsafe["7"] = {"class_type": "Unsafe/Node", "inputs": {}}
-        unsafe_path = self.root / "unsafe-workflow.json"
+        unsafe_source = self.root / "unsafe-source"
+        unsafe_source.mkdir()
+        unsafe_path = unsafe_source / "workflow-api.json"
         unsafe_path.write_text(json.dumps(unsafe), encoding="utf-8")
         unsafe_root = self.root / "unsafe-bundles"
         manifest = self._bundle(
