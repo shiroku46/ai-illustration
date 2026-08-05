@@ -36,7 +36,7 @@ The backend review contract and variant planner enforce the following sequence:
 
 Technical status and creative status remain separate. `technically_valid` means that the bytes and declared metadata passed technical checks; it does not mean that the image is approved as a character identity.
 
-The loopback review API exposes the quality vocabulary and can create quality-aware review documents. Until the browser controls are updated, review JSON downloaded by the older browser form remains a readable legacy record and is intentionally rejected by variant planning rather than being silently promoted.
+The loopback review API remains read-only and exposes the quality vocabulary and current status. The backend review contract can create quality-aware review documents without persisting them. Until the browser controls are updated, review JSON downloaded by the older browser form remains a readable legacy record and is intentionally rejected by variant planning rather than being silently promoted.
 
 ## Hard-fail categories
 
