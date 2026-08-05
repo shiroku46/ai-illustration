@@ -172,7 +172,7 @@ class VideoExportTestCase(unittest.TestCase):
             "pathlib.Path(sys.argv[-1]).write_bytes(b'FAKE-MP4')"
         )
         self.command_template_patcher = patch(
-            "ai_illustration.video_export_source._command_template",
+            "ai_illustration.video_export_plan._command_template",
             side_effect=self._test_command_template,
         )
         self.command_template_patcher.start()
