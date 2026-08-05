@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 TRANSPORT_SMOKE_INTENT = "transport-smoke"
+CANDIDATE_INTENT = "candidate"
 TRANSPORT_SMOKE_OUTPUT = "transport_smoke_output"
 TECHNICAL_CANDIDATE = "technical_candidate"
 CREATIVE_CANDIDATE = "creative_candidate"
@@ -42,9 +43,16 @@ class QualityGateError(ValueError):
 def packaged_quality_stage(request: dict[str, Any]) -> str:
     """Classify package output without ever granting creative approval."""
 
-    if request.get("output_intent") == TRANSPORT_SMOKE_INTENT:
+    intent = request.get("output_intent")
+    if intent == TRANSPORT_SMOKE_INTENT:
         return TRANSPORT_SMOKE_OUTPUT
-    return TECHNICAL_CANDIDATE
+    if intent in {None, CANDIDATE_INTENT}:
+        return TECHNICAL_CANDIDATE
+    raise QualityGateError(
+        "OUTPUT_INTENT",
+        "output_intent must be candidate or transport-smoke",
+        "output_intent",
+    )
 
 
 def normalized_hard_fail_categories(value: Any) -> tuple[str, ...]:
