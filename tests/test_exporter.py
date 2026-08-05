@@ -14,6 +14,7 @@ import zlib
 
 from ai_illustration.exporter import ExportError, build_export_package, check_export_package
 from ai_illustration.naming import canonical_json, content_identifier
+from ai_illustration.quality import CREATIVE_CANDIDATE, TECHNICAL_CANDIDATE
 from ai_illustration.variants import plan_variant_set
 
 
@@ -88,7 +89,7 @@ class ExporterTests(unittest.TestCase):
             "character_ref": "boke@v001", "style_ref": "rough-flat@v001",
             "pose": "neutral", "expression": "neutral", "crop": "full", "facing": "front",
             "tool_id": "fixture-tool", "model_id": "fixture-model",
-            "license_status": "approved", "config": {}, "output_intent": "evaluation",
+            "license_status": "approved", "config": {}, "output_intent": "candidate",
             "provenance": {"source": "fixture"},
         })
         _write_json(self.manifests / "candidate.json", {
@@ -96,6 +97,7 @@ class ExporterTests(unittest.TestCase):
             "request_ref": "request-demo", "path": "candidate.png", "sha256": candidate_sha,
             "width": 1, "height": 1, "color_space": "sRGB", "has_alpha": True,
             "media_type": "image/png", "status": "technically_valid",
+            "quality_stage": TECHNICAL_CANDIDATE,
             "provenance": {"source": "fixture"},
         })
         _write_json(self.manifests / "review.json", {
@@ -103,6 +105,8 @@ class ExporterTests(unittest.TestCase):
             "candidate_ref": "candidate-demo", "candidate_request_ref": "request-demo",
             "candidate_sha256": candidate_sha, "decision": "accept", "reviewer": "owner",
             "timestamp": "2026-08-02T00:00:00Z", "categories": [],
+            "review_scope": "creative", "resulting_quality_stage": CREATIVE_CANDIDATE,
+            "hard_fail_categories": [],
         })
         self.matrix = {
             "combinations": [
