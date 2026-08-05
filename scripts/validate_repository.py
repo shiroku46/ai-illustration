@@ -1,511 +1,306 @@
 #!/usr/bin/env python3
-"""Validate the public automation foundation and rendered targets."""
+"""Validate GitHub-only runtime, optional-provider isolation and Bootstrap parity."""
 from __future__ import annotations
 
-from pathlib import Path
+import hashlib
+import json
 import re
 import sys
+from pathlib import Path
+
+try:
+    from scripts.foundation_product_checks import (
+        CONFIG_PATH as PRODUCT_CHECKS_PATH,
+        ProductCheckConfigError,
+        parse_product_checks,
+    )
+except ModuleNotFoundError:
+    from foundation_product_checks import (
+        CONFIG_PATH as PRODUCT_CHECKS_PATH,
+        ProductCheckConfigError,
+        parse_product_checks,
+    )
 
 ROOT = Path(__file__).resolve().parents[1]
-GENERATED_TARGET_MARKER = "<!-- ai-dev-automation-foundation:generated-target -->"
-SOURCE_MARKER = ROOT / "tests/test_bootstrap.py"
-SOURCE_GENERATOR = ROOT / "bootstrap/generator.py"
 PIN = re.compile(r"uses:\s*[^@\s]+@[0-9a-f]{40}\s*$")
-
 REQUIRED = {
-    "README.md",
-    "LICENSE",
-    "SECURITY.md",
-    "AGENTS.md",
-    "CLAUDE.md",
-    "docs/OPERATING_RULES.md",
-    "docs/PUBLIC_SECURITY_MODEL.md",
-    "scripts/public_export_guard.py",
-    "scripts/validate_repository.py",
-    "scripts/ai_recovery_supervisor.py",
-    "scripts/supervisor_final_guard.py",
-    "scripts/supervisor_policy.py",
-    "scripts/supervisor_runtime.py",
-    "scripts/supervisor_queue_recovery.py",
-    "scripts/supervisor_queue_recovery_v2.py",
-    "scripts/supervisor_queue_recovery_v3.py",
-    ".github/workflows/ci.yml",
-    ".github/workflows/unit-tests.yml",
-    ".github/workflows/trusted-checks.yml",
+    "README.md", "LICENSE", "SECURITY.md", "AGENTS.md", "CLAUDE.md",
+    "docs/PROJECT_STARTUP.md", "docs/MINIMUM_SAFETY_PROFILE.md",
+    "docs/OPERATING_RULES.md", "docs/PUBLIC_SECURITY_MODEL.md",
+    "scripts/public_export_guard.py", "scripts/validate_repository.py",
+    "scripts/queue_failure_classifier.py", "scripts/queue_issue_hydration.py",
+    "scripts/queue_retry_identity.py", "scripts/queue_event_guard.py",
+    "scripts/foundation_product_checks.py",
+    "scripts/github_api_governor.py", "scripts/github_coordinator_supervisor.py",
+    "scripts/supervisor_policy.py", "scripts/foundation_drift.py",
+    PRODUCT_CHECKS_PATH,
+    ".github/workflows/ci.yml", ".github/workflows/unit-tests.yml",
     ".github/workflows/claude-queue.yml",
-    ".github/workflows/ci-reconcile.yml",
-    ".github/workflows/supervisor.yml",
+    ".github/workflows/claude-queue-comment-bridge.yml",
+    ".github/workflows/ci-reconcile.yml", ".github/workflows/supervisor.yml",
+    ".github/ISSUE_TEMPLATE/ai-task.yml", ".github/pull_request_template.md",
 }
+FOUNDATION_ONLY = {"bootstrap/generator.py"}
+GENERATED_TARGET_MARKER = "<!-- ai-dev-automation-foundation:generated-target -->"
 
 
-def fail(message: str) -> None:
-    raise AssertionError(message)
+class ValidationError(AssertionError):
+    pass
 
 
 def text(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def require_all(content: str, values: tuple[str, ...], context: str) -> None:
+def require(content: str, values: tuple[str, ...], context: str) -> None:
     for value in values:
         if value not in content:
-            fail(f"{context} invariant is missing: {value}")
+            raise ValidationError(f"{context} missing invariant: {value}")
 
 
-def job_block(content: str, job: str, next_job: str | None = None) -> str:
-    marker = f"\n  {job}:\n"
+def job(content: str, name: str, following: str | None = None) -> str:
+    marker = f"\n  {name}:\n"
     if marker not in content:
-        fail(f"missing job {job}")
-    result = content.split(marker, 1)[1]
-    if next_job:
-        boundary = f"\n  {next_job}:\n"
-        if boundary not in result:
-            fail(f"missing following job {next_job}")
-        result = result.split(boundary, 1)[0]
-    return result
+        raise ValidationError(f"missing workflow job: {name}")
+    block = content.split(marker, 1)[1]
+    if following:
+        block = block.split(f"\n  {following}:\n", 1)[0]
+    return block
 
 
-def function_block(content: str, name: str, next_name: str) -> str:
-    marker = f"def {name}("
-    boundary = f"\ndef {next_name}("
-    if marker not in content:
-        fail(f"missing function {name}")
-    result = content.split(marker, 1)[1]
-    if boundary not in result:
-        fail(f"runtime function boundary missing: {name} -> {next_name}")
-    return result.split(boundary, 1)[0]
+def validate() -> None:
+    checklist = ROOT / "INSTALL_CHECKLIST.md"
+    generated_target = (
+        checklist.is_file()
+        and GENERATED_TARGET_MARKER in checklist.read_text(encoding="utf-8")
+    )
+    required = REQUIRED if generated_target else REQUIRED | FOUNDATION_ONLY
+    missing = sorted(path for path in required if not (ROOT / path).is_file())
+    if missing:
+        raise ValidationError("missing files: " + ", ".join(missing))
+    try:
+        parse_product_checks((ROOT / PRODUCT_CHECKS_PATH).read_bytes())
+    except ProductCheckConfigError as exc:
+        raise ValidationError(f"product check configuration is invalid: {exc}") from exc
 
+    if generated_target:
+        lock_path = ROOT / "FOUNDATION.lock.json"
+        if lock_path.is_symlink() or not lock_path.is_file():
+            raise ValidationError("generated target lock is missing or unsafe")
+        try:
+            lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValidationError("generated target lock is malformed") from exc
+        if not isinstance(lock, dict) or lock.get("schema_version") != 1:
+            raise ValidationError("generated target lock schema is invalid")
+        if lock.get("generator_version") != "2.0.0":
+            raise ValidationError("generated target generator version is unsupported")
+        if lock.get("source_repository") != "shiroku46/ai-dev-automation-foundation":
+            raise ValidationError("generated target source repository is invalid")
+        if re.fullmatch(r"[0-9a-f]{40}", str(lock.get("source_sha") or "")) is None:
+            raise ValidationError("generated target source SHA is invalid")
+        if lock.get("installation_mode") not in {"new-repository", "existing-product"}:
+            raise ValidationError("generated target installation mode is invalid")
+        if not isinstance(lock.get("installed_at"), str) or not lock["installed_at"]:
+            raise ValidationError("generated target installation time is invalid")
+        managed = lock.get("managed_files")
+        if not isinstance(managed, list):
+            raise ValidationError("generated target managed file list is invalid")
+        normalized: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for item in managed:
+            if not isinstance(item, dict):
+                raise ValidationError("generated target managed file entry is invalid")
+            relative = item.get("path")
+            digest = item.get("sha256")
+            if (
+                not isinstance(relative, str)
+                or re.fullmatch(r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))(?!.*[\x00-\x1f\\])[^:]+$", relative) is None
+                or relative in seen
+                or not isinstance(digest, str)
+                or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            ):
+                raise ValidationError("generated target managed file identity is invalid")
+            seen.add(relative)
+            normalized.append((relative, digest))
+        if normalized != sorted(normalized):
+            raise ValidationError("generated target managed files are not sorted")
+        preserved = {"README.md", "LICENSE", "AGENTS.md", "CLAUDE.md", "SECURITY.md"}
+        target_owned = {PRODUCT_CHECKS_PATH}
+        lock_required = (REQUIRED - preserved - target_owned) | {"INSTALL_CHECKLIST.md"}
+        if not lock_required.issubset(seen):
+            raise ValidationError("generated target lock omits required managed files")
+        for relative, expected_digest in normalized:
+            path = ROOT / relative
+            if path.is_symlink() or not path.is_file():
+                raise ValidationError(f"generated target managed file is missing or unsafe: {relative}")
+            actual = hashlib.sha256(path.read_bytes()).hexdigest()
+            if actual != expected_digest:
+                raise ValidationError(f"generated target managed file drifted: {relative}")
 
-def validate_workflows() -> None:
-    workflows = sorted((ROOT / ".github/workflows").glob("*.yml"))
-    if not workflows:
-        fail("no workflows found")
-    for path in workflows:
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
         content = path.read_text(encoding="utf-8")
-        if "\t" in content:
-            fail(f"{path}: tab indentation is prohibited")
-        if not content.startswith("name:") or "\non:\n" not in content or "\njobs:\n" not in content:
-            fail(f"{path}: required top-level sections are missing")
-        if "pull_request_target" in content:
-            fail(f"{path}: pull_request_target is prohibited")
+        require(content, ("name:", "\non:\n", "\njobs:\n"), str(path))
+        if "\t" in content or "pull_request_target" in content:
+            raise ValidationError(f"unsafe workflow syntax: {path}")
         for line in content.splitlines():
-            stripped = line.strip().removeprefix("- ")
-            if stripped.startswith("uses:") and not PIN.search(line):
-                fail(f"{path}: action is not pinned to a 40-character commit")
+            if line.strip().removeprefix("- ").startswith("uses:") and not PIN.search(line):
+                raise ValidationError(f"unpinned action: {path}: {line.strip()}")
 
     for name in ("ci.yml", "unit-tests.yml"):
         content = text(f".github/workflows/{name}")
-        require_all(
-            content,
-            ("\n  pull_request:\n", "permissions:\n  contents: read", "persist-credentials: false"),
-            name,
-        )
-        for forbidden in (
-            "secrets.",
-            "id-token: write",
-            "actions: write",
-            "checks: write",
-            "statuses: write",
-            "contents: write",
-        ):
+        require(content, ("pull_request:", "contents: read", "persist-credentials: false"), name)
+        for forbidden in ("secrets.", "id-token: write", "contents: write", "actions: write", "checks: write"):
             if forbidden in content:
-                fail(f"{name}: contributor job has forbidden capability {forbidden}")
-    require_all(
-        text(".github/workflows/ci.yml"),
-        ("Psych.parse_stream", "documents.length == 1"),
-        "CI parser",
-    )
-
-    trusted = text(".github/workflows/trusted-checks.yml")
-    require_all(
-        trusted,
-        (
-            "run-name: Trusted checks ${{ inputs.target_sha }}",
-            "\n  workflow_dispatch:\n",
-            "WORKFLOW_REF: ${{ github.workflow_ref }}",
-            "WORKFLOW_SHA: ${{ github.workflow_sha }}",
-            "name: CI / validate",
-            "name: Unit Tests / test",
-        ),
-        "trusted checks",
-    )
-    for forbidden in (
-        "workflow_call:",
-        "checks: write",
-        "statuses: write",
-        "/check-runs",
-        '"external_id"',
-    ):
-        if forbidden in trusted:
-            fail(f"trusted checks contain forbidden evidence path {forbidden}")
-    authorize = job_block(trusted, "authorize", "validate_target")
-    for forbidden in ("actions/checkout@", "secrets.", "issues: write", "checks: write"):
-        if forbidden in authorize:
-            fail(f"trusted authorize job has forbidden capability {forbidden}")
-    for candidate_job in (
-        job_block(trusted, "validate_target", "test_target"),
-        job_block(trusted, "test_target"),
-    ):
-        require_all(
-            candidate_job,
-            (
-                "permissions:\n      contents: read",
-                "persist-credentials: false",
-                'test "$(git rev-parse HEAD)" = "$TARGET_SHA"',
-            ),
-            "trusted candidate job",
-        )
-        for forbidden in ("secrets.", "id-token: write", "contents: write", "checks: write"):
-            if forbidden in candidate_job:
-                fail(f"trusted candidate job has forbidden capability {forbidden}")
-
-    queue = text(".github/workflows/claude-queue.yml")
-    require_all(
-        queue,
-        (
-            "github.actor == github.repository_owner",
-            "github.actor == vars.AUTOMATION_OWNER",
-            'body.strip() == trigger',
-            "trusted_run_id",
-            "actions/runs/{run_id}",
-            'expected_path = f".github/workflows/ci-reconcile.yml@{default_branch}"',
-            "notification: false",
-            "GITHUB_STEP_SUMMARY",
-        ),
-        "Queue",
-    )
-    if "github.triggering_actor" in queue:
-        fail("Queue must not depend on github.triggering_actor")
-    if 'expected_path = f".github/workflows/supervisor.yml@{default_branch}"' in queue:
-        fail("Queue bot dispatch must be bound to the reconciliation workflow")
-    finalize = job_block(queue, "finalize")
-    for forbidden in (
-        "QUEUE_PIPELINE_FAILED",
-        "gh issue comment",
-        "--add-label ai-blocked",
-        "gh label create ai-blocked",
-    ):
-        if forbidden in finalize:
-            fail(f"Queue routine failure must remain non-notifying: {forbidden}")
-
-    reconcile = text(".github/workflows/ci-reconcile.yml")
-    require_all(
-        reconcile,
-        (
-            'workflows: ["CI", "Unit Tests", "Claude Issue Queue"]',
-            "python -m scripts.supervisor_runtime discover",
-            "gh workflow run trusted-checks.yml",
-            '--ref "$DEFAULT_BRANCH"',
-            '-f "target_sha=$TARGET_SHA"',
-            "max-parallel: 2",
-            "\n  queue_recovery:\n",
-            "github.event.workflow_run.name == 'Claude Issue Queue'",
-            "python -m scripts.supervisor_queue_recovery_v3",
-        ),
-        "reconciliation",
-    )
-    queue_recovery = job_block(reconcile, "queue_recovery")
-    require_all(
-        queue_recovery,
-        (
-            "actions: write",
-            "contents: write",
-            "issues: read",
-            "pull-requests: read",
-            "persist-credentials: false",
-            "python -m scripts.supervisor_queue_recovery_v3",
-        ),
-        "Queue recovery job",
-    )
-    for forbidden in ("secrets.", "id-token: write", "issues: write", "pull-requests: write"):
-        if forbidden in queue_recovery:
-            fail(f"Queue recovery job has forbidden capability {forbidden}")
-    if "statuses: write" in reconcile or "/statuses/" in reconcile:
-        fail("reconciliation must not publish custom statuses")
+                raise ValidationError(f"candidate check has forbidden capability: {name}: {forbidden}")
 
     supervisor = text(".github/workflows/supervisor.yml")
-    require_all(
-        supervisor,
-        (
-            '"Trusted Exact-SHA Checks"',
-            '"Claude Issue Queue"',
-            "ref: ${{ github.event.repository.default_branch }}",
-            "persist-credentials: false",
-            "actions: read",
-            "contents: write",
-            "python -m scripts.supervisor_final_guard",
-        ),
-        "supervisor",
-    )
-    supervise_job = job_block(supervisor, "supervise")
-    require_all(
-        supervise_job,
-        (
-            "actions: read",
-            "checks: read",
-            "contents: write",
-            "issues: write",
-            "pull-requests: write",
-            "python -m scripts.supervisor_final_guard",
-        ),
-        "merge supervisor job",
-    )
+    require(supervisor, (
+        'workflows: ["CI", "Unit Tests"]', "issue_comment:", "schedule:",
+        "ref: ${{ github.event.repository.default_branch }}", "persist-credentials: false",
+        "actions: read", "issues: read", "pull-requests: write", "contents: write",
+        "python -m scripts.github_coordinator_supervisor",
+    ), "GitHub coordinator supervisor")
+    for forbidden in ("secrets.", "id-token: write", "actions: write", "issues: write", "anthropic", "codex", "supervisor_queue_recovery"):
+        if forbidden.lower() in supervisor.lower():
+            raise ValidationError(f"Supervisor retains provider/write capability: {forbidden}")
+
+    reconcile = text(".github/workflows/ci-reconcile.yml")
+    require(reconcile, (
+        'workflows: ["CI", "Unit Tests", "Claude Issue Queue"]', "schedule:",
+        "read-only compatibility observation", "queue_recovery:",
+        "actions: write", "contents: write", "issues: read", "pull-requests: write",
+        "queue-complete-", "queue-wip-", '["git", "apply", "--check"', '["git", "commit-tree"',
+        "should_auto_retry", "max_retries = 3", "candidate_execution_with_write_token: `false`",
+        "provider_invocation: false", "human_action_required: false",
+    ), "CI reconciliation and bounded Queue recovery")
+    observe = job(reconcile, "observe", "queue_recovery")
+    require(observe, ("actions: read", "contents: read", "pull-requests: read"), "read-only CI observation")
+    for forbidden in ("actions: write", "contents: write", "issues: write", "pull-requests: write", "secrets.", "id-token: write"):
+        if forbidden in observe:
+            raise ValidationError(f"read-only CI observation can mutate: {forbidden}")
+    recovery = job(reconcile, "queue_recovery")
+    for forbidden in ("secrets.", "id-token: write", "anthropics/", "claude-code-action"):
+        if forbidden.lower() in recovery.lower():
+            raise ValidationError(f"Queue reconciliation has forbidden provider capability: {forbidden}")
+    require(recovery, (
+        "actions: write", "contents: write", "issues: read", "pull-requests: write",
+        "candidate.patch", "checkpoint.json", "scope_is_authorized",
+        "protected_scope_is_authorized", "notification", "human_action_required",
+        "automation-stops/queue-v4", "internal-stop.json", "exhausted.json",
+    ), "bounded Queue recovery job")
+
+    queue = text(".github/workflows/claude-queue.yml")
+    require(queue, (
+        "from scripts.queue_event_guard import resolve_queue_event",
+        "COMMENT_ISSUE:", "COMMENT_BODY:", "COMMENT_IS_PR:",
+        "decision = resolve_queue_event(", "check_tool_permission_contract", "contract_ok",
+        "Optional provider missing secret", "credential-isolated route unavailable",
+        "provider_invocation: false", "repository_credentials_exposed: false",
+        "repository_write: false", "notification: false", "human_action_required: false",
+        "exit 1", "publication_route: GitHub-direct coordinator", "request_fingerprint:",
+        "retry_attempt:", "automation-stops/queue-v4/issue-", "automation-internal-stops",
+        'record.get("next_automatic_action") == "dispatch one optional Queue retry"',
+        "should_auto_retry(failure_class, attempt - 1, 3)",
+    ), "optional Queue")
+    for forbidden in ("EVENT_PATH", "github.event_path"):
+        if forbidden in queue:
+            raise ValidationError(f"optional Queue still reads an event payload file: {forbidden}")
+    if "\n  issues:\n" in queue or "workflow_run:" in queue or "schedule:" in queue:
+        raise ValidationError("optional Queue has an ordinary automatic trigger")
+    prepare = job(queue, "prepare", "implement")
+    require(prepare, (
+        "resolve_queue_event", "decision.issue_number", "decision.allowed",
+        "decision.automated_retry", "decision.fingerprint", "decision.retry_attempt",
+        'owner = os.environ["OWNER"].casefold()',
+        "def api(path):", "def api_pages(path):", "def trigger_identity(issue):",
+        "def request_fingerprint(issue, base_sha):",
+        "request_fingerprint(issue, base_sha)",
+    ), "optional Queue dispatch guard")
+    for forbidden in ("contents: write", "issues: write", "pull-requests: write", "id-token: write"):
+        if forbidden in prepare:
+            raise ValidationError(f"Queue dispatch guard can write or obtain OIDC: {forbidden}")
+    implement = job(queue, "implement", "verify")
+    require(implement, (
+        "timeout-minutes: 5", "permissions: {}", "Optional provider missing secret",
+        "credential-isolated route unavailable", "provider_invocation: false",
+        "repository_credentials_exposed: false", "repository_write: false",
+        "notification: false", "human_action_required: false", "exit 1",
+    ), "credential-isolated optional route")
     for forbidden in (
-        "\n  pull_request:\n",
-        "secrets.",
-        "id-token: write",
-        "actions: write",
-        "python -m scripts.supervisor_queue_recovery_v3",
+        "continue-on-error: true", "secrets.", "id-token: write", "anthropics/",
+        "actions/checkout@", "GH_TOKEN", "github.token", "persist-credentials",
+        "remote.origin", "contents: write", "issues: write", "pull-requests: write",
+        "queue-checkpoint", "candidate.patch", "checkpoint.json", "upload-artifact@",
     ):
-        if forbidden in supervisor:
-            fail(f"merge supervisor is not least privilege: {forbidden}")
+        if forbidden in implement:
+            raise ValidationError(f"credential-isolated optional route retains forbidden capability: {forbidden}")
+    verify = job(queue, "verify", "publish")
+    for forbidden in ("secrets.", "id-token: write", "contents: write", "pull-requests: write"):
+        if forbidden in verify:
+            raise ValidationError(f"verification job has forbidden capability: {forbidden}")
+    publish = job(queue, "publish", "finalize")
+    require(publish, ("contents: read", "repository_write: false"), "artifact publication handoff")
+    for forbidden in ("contents: write", "pull-requests: write", "secrets.", "id-token: write", "anthropics/"):
+        if forbidden in publish:
+            raise ValidationError(f"optional publication handoff can mutate: {forbidden}")
+
+    runtime = text("scripts/github_coordinator_supervisor.py")
+    require(runtime, (
+        "foundation-coordinator-review", "foundation-protected-authorization",
+        "ai-no-merge", "workflow differs from the default-branch definition",
+        "review evidence changed during evaluation",
+        "expected-head merge was rejected", "human_action_required",
+    ), "coordinator runtime")
+    classifier = text("scripts/queue_failure_classifier.py")
+    require(classifier, (
+        "optional_provider_explicitly_enabled", "credential_ui_only_proven",
+        "optional provider route unavailable; continue GitHub-direct work",
+    ), "provider failure policy")
 
 
-def validate_policy_and_runtime() -> None:
-    policy = text("scripts/supervisor_policy.py")
-    require_all(
-        policy,
-        (
-            "declared_paths",
-            "protected_authorized_paths",
-            "scope_is_authorized",
-            "protected_scope_is_authorized",
-            'authorized.endswith("/**")',
-            'any(character in authorized for character in "*?[")',
-            'line.startswith("<!--")',
-            '"scripts/supervisor_policy.py"',
-            '"scripts/supervisor_final_guard.py"',
-            '"scripts/supervisor_queue_recovery.py"',
-            '"scripts/supervisor_queue_recovery_v2.py"',
-            '"scripts/supervisor_queue_recovery_v3.py"',
-        ),
-        "source scope policy",
-    )
-
-    runtime = text("scripts/supervisor_runtime.py")
-    require_all(
-        runtime,
-        (
-            "trusted_workflow_id()",
-            "current_default_sha()",
-            'run.get("event") != "workflow_dispatch"',
-            'run.get("display_title") != f"Trusted checks {sha}"',
-            "trusted_runs_for_sha",
-            "trusted_run_jobs",
-            'actions/runs/{run_id}/jobs?filter=all',
-            "ATTESTATION_JOB_NAMES",
-            "_complete_successful_job_set",
-            "previous_filename",
-            "scope_is_authorized(changed, issue_body)",
-            "protected_scope_is_authorized",
-            '"UNAUTHORIZED_CHANGED_PATH"',
-            "_codex_items",
-            "_codex_event_timestamp",
-            "_workflow_definition_matches_default",
-            "_content_blob_sha",
-            "candidate_blob == default_blob",
-            "stable_default_sha = _require_exact_sha(current_default_sha())",
-            "final_default_sha != stable_default_sha",
-            "Default branch moved during complete native workflow evidence validation",
-            "_run_belongs_to_pr",
-            "native_workflow_evidence",
-            '"e2e.yml", "E2E Acceptance"',
-            "_connected_repository_creation_evidence",
-            "_connected_human_notice_evidence",
-            "human_notice_context",
-            "human_only_connected_evidence",
-            "Final audit impossibility evidence changed",
-            "Connected human-only condition changed after the final audit",
-            "Connected human-only condition changed before publication",
-            "Caller attempted-path assertions do not match connected audit evidence",
-            "No reason-specific connected provider evidence adapter is available",
-            'INTERNAL_STOP_BRANCH = "automation-internal-stops"',
-            "canonical_internal_stop_record",
-            "canonical_human_notice_record",
-            "persist_internal_stop_record",
-            "persist_human_notice_record",
-            '"notification": False',
-            '"required_human_action": None',
-            "merge_method=squash",
-            'f"sha={sha}"',
-        ),
-        "runtime",
-    )
-    for forbidden in ("external_id", "run_id_from_details_url", "/commits/{sha}/status"):
-        if forbidden in runtime:
-            fail(f"runtime trusts forbidden metadata {forbidden}")
-
-    stop = function_block(runtime, "stop_report", "format_human_only_notice")
-    require_all(
-        stop,
-        ("self_resolution_audit", "persist_internal_stop_record", "_revalidate_stop_reason"),
-        "internal stop",
-    )
-    for forbidden in ("comment(", "ensure_label(", "--add-label", "/comments"):
-        if forbidden in stop:
-            fail(f"routine stop notifies or mutates labels: {forbidden}")
-
-    notice = function_block(runtime, "human_only_notice", "discover_targets")
-    require_all(
-        notice,
-        (
-            "_connected_human_notice_evidence",
-            "format_human_only_notice",
-            "_validated_notice_destination",
-            "human_notice_context=notice_context",
-            "persist_human_notice_record",
-            "_existing_internal_record",
-            "ACTIONS_LOGIN",
-            'item.get("created_at") == item.get("updated_at")',
-        ),
-        "human-only notice",
-    )
-
-    supervise = function_block(runtime, "supervise", "main")
-    if 'pr.get("updated_at")' in supervise or 'pr["updated_at"]' in supervise:
-        fail("no-progress must not use Pull Request-wide updated_at")
-    require_all(
-        supervise,
-        (
-            'minutes_since(codex.get("request_timestamp"))',
-            "latest_successful_attestation_timestamp(attempts)",
-            "native_workflow_evidence(sha, pr_number)",
-            "final_native_clean",
-            'scope_error in {"UNAUTHORIZED_CHANGED_PATH", "UNAUTHORIZED_PROTECTED_PATH"}',
-        ),
-        "terminal evidence gate",
-    )
-
-    final_guard = text("scripts/supervisor_final_guard.py")
-    require_all(
-        final_guard,
-        (
-            "_verified_gate",
-            "_exact_live_default_sha",
-            "_require_unchanged_default",
-            "attestation_attempts",
-            "_native_workflow_evidence",
-            "_authorized_source_issue",
-            'isinstance(live_pr.get("labels"), list)',
-            "source_and_scope(live_pr)",
-            'live_pr.get("state") != "open"',
-            'live_pr.get("draft") is not False',
-            'live_pr.get("mergeable") is not True',
-            "_verified_gate = None",
-            "_original_request_codex",
-            "request_codex_exact_head",
-            "_original_request_codex(pr_number, sha)",
-        ),
-        "final merge guard",
-    )
-    if "request_codex_without_provider_mention" in final_guard:
-        fail("final merge guard must not replace the provider review dispatch with an inert marker")
-
-    recovery = text("scripts/supervisor_queue_recovery.py")
-    recovery_v2 = text("scripts/supervisor_queue_recovery_v2.py")
-    recovery_v3 = text("scripts/supervisor_queue_recovery_v3.py")
-    require_all(
-        recovery,
-        (
-            'QUEUE_WORKFLOW_NAME = "Claude Issue Queue"',
-            "MAX_QUEUE_RECOVERY_ATTEMPTS = 3",
-            'RETRY_REASON = "QUEUE_PIPELINE_RETRY_EXHAUSTED"',
-            '"notification": False',
-            "_put_exact_record",
-            "_revalidate_request",
-        ),
-        "Queue recovery",
-    )
-    require_all(
-        recovery_v2,
-        (
-            "_wait_for_queue_implementation_start",
-            "QUEUE_START_TIMEOUT_SECONDS",
-            "_connected_exhaustion_snapshot",
-            "guarded_record_exhaustion",
-            '"notification": False',
-            'actions/workflows/ci-reconcile.yml',
-            "required_reconcile",
-            'expected_path = f".github/workflows/ci-reconcile.yml@{default_branch}"',
-            "python -m scripts.supervisor_final_guard",
-            '"actions: write" in supervisor_text',
-        ),
-        "Queue recovery hardening",
-    )
-    require_all(
-        recovery_v3,
-        (
-            "content_bound_request_fingerprint",
-            "_validated_issue_scope",
-            "_trusted_alternative_candidates",
-            "complete_connected_exhaustion_snapshot",
-            "Trusted alternative candidate appeared during complete Queue audit",
-            "source_protected_authorized_paths",
-        ),
-        "Queue recovery final races",
-    )
-
-
-def validate_identity() -> None:
-    checklist = ROOT / "INSTALL_CHECKLIST.md"
-    generated = checklist.is_file() and GENERATED_TARGET_MARKER in checklist.read_text(encoding="utf-8")
-    source = SOURCE_MARKER.is_file()
-    if generated:
-        if SOURCE_GENERATOR.exists():
-            fail("generated target unexpectedly contains bootstrap/generator.py")
-        return
-    if source:
-        if not SOURCE_GENERATOR.is_file():
-            fail("Foundation source checkout is missing bootstrap/generator.py")
-        generator = SOURCE_GENERATOR.read_text(encoding="utf-8")
-        require_all(
-            generator,
-            (
-                '".github/workflows/trusted-checks.yml"',
-                '"README.md"',
-                '"LICENSE"',
-                '"scripts/supervisor_final_guard.py"',
-                '"scripts/supervisor_queue_recovery.py"',
-                '"scripts/supervisor_queue_recovery_v2.py"',
-                '"scripts/supervisor_queue_recovery_v3.py"',
-                "GENERATED_TARGET_MARKER",
-                "every changed and renamed path",
-                "protected-change authorization",
-                "native pull-request workflow evidence",
-                "one stable default-branch commit",
-                "E2E Acceptance",
-                "Queue failure creates no routine Issue or Pull Request comment",
-                "Queue recovery is bounded, deterministic, idempotent, non-notifying",
-                "one unchanged default-branch SHA",
-                "explicit label evidence",
-                "single-use",
-                "automation-internal-stops",
-                "never posted as Issue or Pull Request comments",
-                "github-actions[bot]",
-                "automatic-resumption condition",
-                "inside the final audit",
-                "immediately before publication",
-            ),
-            "Bootstrap parity",
+    if not generated_target:
+        retired = (
+            "scripts/ai_recovery_supervisor.py",
+            "scripts/supervisor_final_guard.py",
+            "scripts/supervisor_runtime.py",
+            "scripts/supervisor_queue_recovery.py",
+            "scripts/supervisor_queue_recovery_v2.py",
+            "scripts/supervisor_queue_recovery_v3.py",
         )
-        return
-    fail("repository identity is ambiguous: no source marker or generated-target marker")
+        present = [relative for relative in retired if (ROOT / relative).exists()]
+        if present:
+            raise ValidationError("retired runtime files remain: " + ", ".join(present))
+
+    issue_template = text(".github/ISSUE_TEMPLATE/ai-task.yml")
+    require(issue_template, ("GitHub-only", "Risk tier", "Allowed paths", "Required checks", "Prohibited effects", "Rollback"), "Issue template")
+    pr_template = text(".github/pull_request_template.md")
+    require(pr_template, ("implementation_route", "github-direct", "exact_head_sha", "review_route", "github-coordinator", "review_state", "unresolved_review_threads", "human_action_required"), "PR template")
+
+    if not generated_target:
+        generator = text("bootstrap/generator.py")
+        require(generator, (
+            "MANAGED_FILES", "INSTALL_MODES", "PRESERVE_IF_PRESENT", "plan_render",
+            "Bootstrap collisions", "FOUNDATION.lock.json", "source_sha",
+            "destination.write_bytes(sources[relative])", "scripts/foundation_drift.py",
+            "scripts/queue_issue_hydration.py", "scripts/queue_retry_identity.py",
+            "scripts/queue_event_guard.py", "scripts/foundation_product_checks.py",
+            "scripts/github_api_governor.py",
+            "scripts/github_coordinator_supervisor.py", "scripts/supervisor_policy.py",
+            ".github/workflows/supervisor.yml", "Codex and Claude setup is optional",
+            "Non-destructive publication", "BOOTSTRAP_WORKFLOW_TOKEN",
+        ), "Bootstrap")
 
 
 def main() -> int:
-    missing = sorted(path for path in REQUIRED if not (ROOT / path).is_file())
-    if missing:
-        fail(f"missing required files: {missing}")
-    validate_workflows()
-    validate_policy_and_runtime()
-    validate_identity()
-    print("repository validation: clean")
-    return 0
+    try:
+        validate()
+        print("repository validation passed")
+        return 0
+    except (OSError, ValidationError, ValueError) as exc:
+        print(f"repository validation failed: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except AssertionError as exc:
-        print(f"validation failed: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+    raise SystemExit(main())

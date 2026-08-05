@@ -1,0 +1,118 @@
+{
+  "generator_version": "2.0.0",
+  "installation_mode": "existing-product",
+  "installed_at": "2026-08-05T11:32:29Z",
+  "managed_files": [
+    {
+      "path": ".github/ISSUE_TEMPLATE/ai-task.yml",
+      "sha256": "eca4556ff30c1810a1796da50715ad697bd22e41ff250fa1dada8a57742d5efc"
+    },
+    {
+      "path": ".github/pull_request_template.md",
+      "sha256": "a31743ca198a2695ff9e46173d334ce8ef9a085b16fd38069d913669473230da"
+    },
+    {
+      "path": ".github/workflows/ci-reconcile.yml",
+      "sha256": "8f0340c6688abc37b4361ff05e603ced7644b2efa6bd06130a5f3c425c0a1bd8"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "db860e924b202116bcd8a6263f75fd98743500abc3abd87205d4c63fccd22b57"
+    },
+    {
+      "path": ".github/workflows/claude-queue-comment-bridge.yml",
+      "sha256": "a8e7abd5e1efe1992268b57be8e72a1bbff4f280aa1be9ba7b648288d1d7875e"
+    },
+    {
+      "path": ".github/workflows/claude-queue.yml",
+      "sha256": "5ad26830fddd88b95c3972a67628ffaf7cf74ac28950dbea12ae2411f97c1b41"
+    },
+    {
+      "path": ".github/workflows/supervisor.yml",
+      "sha256": "d2b7abfedcbf059e44d10ec314ca60fe47fd51b7ca99a22eae8236f055359866"
+    },
+    {
+      "path": ".github/workflows/trusted-checks.yml",
+      "sha256": "1ab0702ee8563fb365132596899b0203c79d4d6278d3e95066cc85917f09e0aa"
+    },
+    {
+      "path": ".github/workflows/unit-tests.yml",
+      "sha256": "04a71b9d573b438ea2b5efc0424f7d3a3320391e8e6cfc10b8826e8c09d53a01"
+    },
+    {
+      "path": "INSTALL_CHECKLIST.md",
+      "sha256": "f13c5751a5b0646e68a2fc531fc27f1fc8a311ee564788c72a7825c5e6c5fa41"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "877d2f56ba9e503ebfb065af490cb464088430d13a929b814aaefb857a0dbdcd"
+    },
+    {
+      "path": "SECURITY.md",
+      "sha256": "bf977f615a572f658cc8945808377273cb4a8e0e694106d8daaabefc2b37bbaf"
+    },
+    {
+      "path": "docs/MINIMUM_SAFETY_PROFILE.md",
+      "sha256": "1e909b0d9c0d158604d38c42f36d0b4e57b449835c857677d8d2ca555f0d1354"
+    },
+    {
+      "path": "docs/OPERATING_RULES.md",
+      "sha256": "0273deb4a50d11307d6d22f34fb13273a922b21f69781e65343cda939e04ef14"
+    },
+    {
+      "path": "docs/PROJECT_STARTUP.md",
+      "sha256": "c2f3ae0a3b502dd7f08fda895f41db0bbf30b5ec05d77fe4bf37cf14d51dd80a"
+    },
+    {
+      "path": "docs/PUBLIC_SECURITY_MODEL.md",
+      "sha256": "842b4414faa101d660d61d9c35cb0443f0200d4cced33e1360fa90bc29267f84"
+    },
+    {
+      "path": "scripts/foundation_drift.py",
+      "sha256": "4c1fb9f4017f61ac327f049a96ead45d9cfbd28bd7c39ab7ceaf14b6a7d7afb3"
+    },
+    {
+      "path": "scripts/foundation_product_checks.py",
+      "sha256": "f17a12bd37e60292019dcf19890927ce747dfd0cd571d73d06063018d3f56df2"
+    },
+    {
+      "path": "scripts/github_api_governor.py",
+      "sha256": "a61123ffb25368210c99b720a5f578939374dae32ca2e658b2bba61aa337fc4c"
+    },
+    {
+      "path": "scripts/github_coordinator_supervisor.py",
+      "sha256": "11a5d8c1f076d76a932be6904f9549822fa11867b7e70f4f0c0954ee0cfcae82"
+    },
+    {
+      "path": "scripts/public_export_guard.py",
+      "sha256": "945757798e063d82191e2457a7efc7cb755049e5bda76d538deb22705a0fa52a"
+    },
+    {
+      "path": "scripts/queue_event_guard.py",
+      "sha256": "cd6dbcbd4b8faf239d9b595bbc0f74d4dc7cc4b6f1084f45692dd01e2122bf6a"
+    },
+    {
+      "path": "scripts/queue_failure_classifier.py",
+      "sha256": "c8dd3d268dde779b94f72088c84cae7b2ddf6aec83025b3d9b2ee91bca722970"
+    },
+    {
+      "path": "scripts/queue_issue_hydration.py",
+      "sha256": "eef043f6092fac5ca3e930a165c396fa802524ea7fa51c79703888d4d560dc62"
+    },
+    {
+      "path": "scripts/queue_retry_identity.py",
+      "sha256": "084e63d425df345a0d4d8ad09c980d9170bdfdb21ff172e2ec2af0319158d95c"
+    },
+    {
+      "path": "scripts/supervisor_policy.py",
+      "sha256": "ce1a79039f85c9e9def25b6bea36dc2ece9aab039d985ff4e43556341b4ffdfa"
+    },
+    {
+      "path": "scripts/validate_repository.py",
+      "sha256": "dad7a09b3fd79d83ad75119700ba07e6dc8d3a4b5c1c4e92a5abfb7c12b60fec"
+    }
+  ],
+  "schema_version": 1,
+  "source_repository": "shiroku46/ai-dev-automation-foundation",
+  "source_sha": "c2b747b720552137d9d02efd96a692a97699afcc"
+}

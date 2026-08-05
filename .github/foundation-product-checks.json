@@ -1,0 +1,9 @@
+{
+  "checks": [
+    {
+      "name": "Product Unit Tests",
+      "workflow": ".github/workflows/product-unit-tests.yml"
+    }
+  ],
+  "schema_version": 1
+}
