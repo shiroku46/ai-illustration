@@ -1,0 +1,54 @@
+{
+  "kind": "tool-profile",
+  "schema_version": "1.0",
+  "id": "anima-aesthetic-v1-1",
+  "version": "v001",
+  "profile_type": "model-configuration",
+  "adapter_type": "comfyui",
+  "runtime_type": "pytorch",
+  "offline_capability": "yes",
+  "deterministic_seed_support": true,
+  "control_capabilities": [
+    "fixed-seed",
+    "text-to-image"
+  ],
+  "minimum_vram_gb": 8,
+  "minimum_ram_gb": 16,
+  "supported_operating_systems": [
+    "windows"
+  ],
+  "install_state": "uninstalled",
+  "evidence_references": [
+    {
+      "source_url": "https://huggingface.co/circlestone-labs/Anima",
+      "retrieved_at": "2026-08-06",
+      "claim": "Official model card records native ComfyUI support, Anima Aesthetic, 512-1536 pixel generation, CFG 4-5, 30-50 steps, and er_sde as a recommended sampler."
+    },
+    {
+      "source_url": "https://huggingface.co/circlestone-labs/Anima/blob/main/split_files/diffusion_models/anima-aesthetic-v1.1.safetensors",
+      "retrieved_at": "2026-08-06",
+      "claim": "Exact diffusion model filename anima-aesthetic-v1.1.safetensors; size 4181385600 bytes; SHA-256 3c1868387a3a1ff504bbb87c33678321965ead381fcf87afbd0264daa600c082."
+    },
+    {
+      "source_url": "https://huggingface.co/circlestone-labs/Anima/blob/main/split_files/text_encoders/qwen_3_06b_base.safetensors",
+      "retrieved_at": "2026-08-06",
+      "claim": "Exact text encoder filename qwen_3_06b_base.safetensors; size 1192135096 bytes; SHA-256 cd2a512003e2f9f3cd3c32a9c3573f820bb28c940f73c57b1ddaa983d9223eba."
+    },
+    {
+      "source_url": "https://huggingface.co/circlestone-labs/Anima/blob/main/split_files/vae/qwen_image_vae.safetensors",
+      "retrieved_at": "2026-08-06",
+      "claim": "Exact VAE filename qwen_image_vae.safetensors; size 253806246 bytes; SHA-256 a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f."
+    },
+    {
+      "source_url": "https://huggingface.co/circlestone-labs/Anima/blob/main/LICENSE.md",
+      "retrieved_at": "2026-08-06",
+      "claim": "CircleStone Labs Non-Commercial License v1.2 permits internal non-production evaluation and commercial use of outputs, but does not approve commercial or production use of the model; this profile is benchmark-only."
+    }
+  ],
+  "license_evidence_state": "approved",
+  "commercial_use_review_state": "approved",
+  "decision_state": "approved",
+  "benchmark_use_review_state": "approved",
+  "production_model_use_review_state": "rejected",
+  "commercial_output_use_review_state": "approved"
+}
