@@ -1,22 +1,34 @@
-# Exact model installation manifest
+# Exact benchmark model installation
 
-The benchmark model files are owner-controlled local inputs. They are not committed, downloaded, installed, or executed by this repository.
+The model files remain owner-controlled local inputs. This repository commits only reviewed profiles, exact artifact metadata, API-format workflow templates, validation code, and a fail-closed Windows installer.
 
-The canonical machine-readable record is:
+Canonical records:
 
 ```text
 benchmark/model-install-manifest.v001.json
+benchmark/model-profiles/*.json
+benchmark/workflows/*.api.json
 ```
 
-Validate the repository-side evidence without mutation:
+## Repository-side verification
 
-```text
-python -m ai_illustration.model_install_manifest check \
-  benchmark/model-install-manifest.v001.json \
+Run this before any local download:
+
+```powershell
+python -m ai_illustration.model_install_manifest check `
+  benchmark/model-install-manifest.v001.json `
   --workspace-root .
 ```
 
-A successful result verifies the exact model profiles, profile hashes, license scopes, model artifact metadata, benchmark settings, and required local API-workflow paths. It does not claim that the large model files are present.
+A successful result verifies:
+
+- exact profile bytes and canonical profile hashes;
+- benchmark, production-model, and commercial-output license scopes;
+- artifact URLs, filenames, destinations, byte sizes, and SHA-256 values;
+- exact committed workflow bytes and workflow hashes;
+- model-loader topology, fixed seed, sampler, scheduler, steps, CFG, resolution, prompts, and output node.
+
+It does not claim that the large model files are installed.
 
 ## Exact local files
 
@@ -30,48 +42,62 @@ Relative to the owner’s ComfyUI directory:
 | Anima text encoder | `models/text_encoders` | `qwen_3_06b_base.safetensors` | 1,192,135,096 | `cd2a512003e2f9f3cd3c32a9c3573f820bb28c940f73c57b1ddaa983d9223eba` | required by Anima |
 | Anima VAE | `models/vae` | `qwen_image_vae.safetensors` | 253,806,246 | `a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f` | required by Anima |
 
-Do not rename the files. The later workflow and preflight gates bind the exact filenames.
+Total download size is 19,506,203,898 bytes, approximately 18.17 GiB. Do not rename the files.
 
-## Windows checksum verification
+## Dry-run installation plan
 
-Run this for each downloaded file, replacing the path:
-
-```powershell
-Get-FileHash -Algorithm SHA256 "C:\path\to\ComfyUI\models\checkpoints\animagine-xl-4.0-opt.safetensors"
-```
-
-The reported hash must exactly match the manifest. A mismatched file must not be used or renamed into place.
-
-Optional size check:
+The helper is dry-run by default. Replace the path with the actual ComfyUI directory:
 
 ```powershell
-(Get-Item "C:\path\to\file.safetensors").Length
+powershell -ExecutionPolicy Bypass -File .\tools\install-benchmark-models.ps1 `
+  -ComfyUIRoot "C:\path\to\ComfyUI"
 ```
 
-## Benchmark settings
+Dry-run behavior:
 
-The fixed initial settings are recorded in the manifest.
+- verifies the exact reviewed manifest bytes;
+- verifies any already-present artifact by byte size and SHA-256;
+- reports missing files as `planned-download`;
+- creates no directories;
+- performs no network request;
+- launches no process and does not start ComfyUI.
 
-- Animagine: 1024×1024, 28 steps, CFG 5, `euler_ancestral`, tag prompts. These settings follow the official model-card guidance.
-- Illustrious: 1024×1024, 28 steps, CFG 5, `euler_ancestral`, hybrid prompts. These are a project comparison baseline, not a claim of official recommended settings.
-- Anima Aesthetic: 1024×1024, 40 steps, CFG 4.5, `er_sde`, natural-language prompts. These are selected within the official model-card ranges.
+Any existing file with the expected name but different bytes causes an immediate failure and is never overwritten.
 
-All later benchmark cases still use the shared fixed seed set and owner-approved art-direction contract.
+## Explicit installation
 
-## Required API workflow exports
+After reviewing the dry-run output, execute:
 
-After the files are installed and ComfyUI can load them, export one API-format workflow per model to these repository-ignored local paths:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\install-benchmark-models.ps1 `
+  -ComfyUIRoot "C:\path\to\ComfyUI" `
+  -Execute `
+  -AcknowledgeExactArtifacts `
+  -AcknowledgeAnimaEvaluationOnly
+```
+
+The helper downloads only the exact HTTPS URLs in the reviewed manifest. Each file is downloaded to a unique partial path, checked for exact byte size and SHA-256, and moved into place only after verification. A mismatched or racing target is never replaced.
+
+## Fixed workflow templates
+
+No manual workflow construction or export is required. The committed API-format templates are:
 
 ```text
-local/benchmark-workflows/animagine-xl.api.json
-local/benchmark-workflows/illustrious-xl.api.json
-local/benchmark-workflows/anima-aesthetic.api.json
+benchmark/workflows/animagine-xl.api.json
+benchmark/workflows/illustrious-xl.api.json
+benchmark/workflows/anima-aesthetic.api.json
 ```
 
-The workflow must encode the exact model filename and manifest settings. UI-format workflow JSON is not accepted in place of API-format JSON.
+Initial settings:
 
-## License boundary
+- Animagine: 1024×1024, seed 101, 28 steps, CFG 5, `euler_ancestral`, `normal`, tag prompts.
+- Illustrious: 1024×1024, seed 101, 28 steps, CFG 5, `euler_ancestral`, `normal`, hybrid prompts. These are a project comparison baseline rather than an official-settings claim.
+- Anima Aesthetic: 1024×1024, seed 101, 40 steps, CFG 4.5, `er_sde`, `simple`, natural-language prompts, split diffusion/text-encoder/VAE loaders, and sampling shift 3.0.
 
-Animagine and Illustrious are production candidates only after their exact profiles and later generated evidence continue to pass all gates. Anima Aesthetic is admitted solely as a benchmark comparison under the recorded non-production evaluation scope. The owner model-selection gate refuses to issue a production lock for it.
+Later benchmark preparation replaces the template seed, prompt case, and output prefix deterministically while preserving the exact model and settings contract.
 
-No successful download, checksum, workflow load, benchmark result, timing result, or contact-sheet position constitutes aesthetic approval or model selection.
+## License and quality boundary
+
+Animagine and Illustrious are production candidates only if all later evidence and owner gates continue to pass. Anima Aesthetic is included solely for non-production benchmark comparison under its recorded scope; the owner-selection gate cannot issue a production lock for it.
+
+A successful download, checksum, workflow load, generation, timing result, or contact-sheet position is not aesthetic approval and does not select a model.
