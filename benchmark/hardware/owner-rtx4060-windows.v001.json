@@ -1,0 +1,14 @@
+{
+  "kind": "hardware-profile",
+  "schema_version": "1.0",
+  "id": "owner-rtx4060-windows",
+  "operating_system": "windows",
+  "ram_gb": 32,
+  "vram_gb": 8,
+  "runtime_types": [
+    "pytorch"
+  ],
+  "adapter_types": [
+    "comfyui"
+  ]
+}
