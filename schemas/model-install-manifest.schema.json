@@ -156,10 +156,11 @@
     "workflow": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "expected_api_path"],
+      "required": ["status", "path", "sha256"],
       "properties": {
-        "status": {"const": "human-export-required"},
-        "expected_api_path": {"$ref": "#/$defs/safePath"}
+        "status": {"const": "repository-template"},
+        "path": {"$ref": "#/$defs/safePath"},
+        "sha256": {"$ref": "#/$defs/sha256"}
       }
     }
   }
