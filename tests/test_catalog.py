@@ -85,18 +85,41 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("APPROVAL_WITHOUT_LICENSE", codes)
         self.assertIn("APPROVAL_WITHOUT_COMMERCIAL_REVIEW", codes)
 
-    def test_model_profiles_require_explicit_scope_fields(self) -> None:
-        model = {**self.tool, "profile_type": "model-configuration"}
+    def test_legacy_model_profile_remains_valid_and_eligible(self) -> None:
+        model = {
+            **self.tool,
+            "id": "legacy-model",
+            "profile_type": "model-configuration",
+            "license_evidence_state": "approved",
+            "commercial_use_review_state": "approved",
+            "decision_state": "approved",
+        }
+        self.assertEqual([], validate_tool_profile(self.tool_path, model))
+        eligibility = evaluate_model_license_eligibility(model)
+        self.assertTrue(eligibility.benchmark_eligible)
+        self.assertTrue(eligibility.production_eligible)
+        self.assertTrue(eligibility.commercial_output_eligible)
+        self.assertEqual("legacy", eligibility.states["scope_contract"])
+        self.assertEqual("compatible-by-declaration", evaluate_compatibility(model, self.hardware).status)
+
+    def test_partial_model_scope_is_rejected(self) -> None:
+        model = {
+            **self.tool,
+            "profile_type": "model-configuration",
+            "benchmark_use_review_state": "approved",
+        }
         diagnostics = validate_tool_profile(self.tool_path, model)
         missing = {item.field for item in diagnostics if item.code == "MISSING_FIELD"}
         self.assertEqual(
             {
-                "benchmark_use_review_state",
                 "production_model_use_review_state",
                 "commercial_output_use_review_state",
             },
             missing,
         )
+        eligibility = evaluate_model_license_eligibility(model)
+        self.assertFalse(eligibility.benchmark_eligible)
+        self.assertIn("license-scope-contract-incomplete", eligibility.denial_reasons)
 
     def test_benchmark_only_model_is_not_production_eligible(self) -> None:
         model = self._model_profile()
@@ -106,6 +129,7 @@ class CatalogTests(unittest.TestCase):
         self.assertFalse(eligibility.production_eligible)
         self.assertTrue(eligibility.commercial_output_eligible)
         self.assertIn("production-model-use-not-approved", eligibility.denial_reasons)
+        self.assertEqual("explicit", eligibility.states["scope_contract"])
         self.assertEqual("compatible-by-declaration", evaluate_compatibility(model, self.hardware).status)
 
     def test_fully_approved_model_is_production_eligible(self) -> None:
@@ -155,6 +179,8 @@ class CatalogTests(unittest.TestCase):
             {"approved", "not-applicable"},
             set(approved_model["commercial_output_use_review_state"]["enum"]),
         )
+        approved_required = set(schema["allOf"][2]["if"]["required"])
+        self.assertTrue(model_required <= approved_required)
 
     def test_rejects_contradictory_or_unknown_fields(self) -> None:
         tool = copy.deepcopy(self.tool)
