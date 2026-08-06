@@ -13,6 +13,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$ExpectedManifestSha256 = "1e7bc331054ee090a1570c8d44ac783d9a515acc5f9483bb4f2ad0c9c59dc183"
 
 function Assert-SafeChildPath {
     param(
@@ -61,10 +62,17 @@ $rootResolved = (Resolve-Path -LiteralPath $ComfyUIRoot).Path
 if (-not (Test-Path -LiteralPath $rootResolved -PathType Container)) {
     throw "ComfyUIRoot must be an existing directory."
 }
+$manifestSha256 = (Get-FileHash -LiteralPath $manifestResolved -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($manifestSha256 -ne $ExpectedManifestSha256) {
+    throw "Manifest bytes do not match the reviewed repository manifest."
+}
 
 $manifest = Get-Content -LiteralPath $manifestResolved -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($manifest.kind -ne "model-install-manifest" -or $manifest.schema_version -ne "1.0") {
     throw "Unsupported model installation manifest."
+}
+if ($manifest.id -ne "manzai-three-model-benchmark-install" -or $manifest.version -ne "v001") {
+    throw "Unexpected model installation manifest identity."
 }
 if ($null -eq $manifest.models -or @($manifest.models).Count -lt 3) {
     throw "The manifest must contain at least three model entries."
@@ -153,11 +161,7 @@ foreach ($model in @($manifest.models)) {
         }
         $partial = "$target.partial-$([System.Guid]::NewGuid().ToString('N'))"
         try {
-            Invoke-WebRequest \
-                -Uri $source \
-                -OutFile $partial \
-                -UseBasicParsing \
-                -MaximumRedirection 5
+            Invoke-WebRequest -Uri $source -OutFile $partial -UseBasicParsing -MaximumRedirection 5
 
             $partialItem = Get-Item -LiteralPath $partial
             $partialSha256 = (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -191,6 +195,7 @@ foreach ($model in @($manifest.models)) {
     ok = $true
     mode = $(if ($Execute) { "execute" } else { "dry-run" })
     manifest = $manifestResolved
+    manifest_sha256 = $manifestSha256
     comfyui_root = $rootResolved
     artifact_count = $results.Count
     artifacts = @($results)
