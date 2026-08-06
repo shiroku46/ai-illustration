@@ -18,6 +18,7 @@ from .benchmark_results import (
     result_set_sha256,
     validate_results,
 )
+from .catalog import evaluate_model_license_eligibility
 from .model_benchmark import canonical_sha256
 from .naming import SHA256_RE, TOKEN_RE, VERSION_RE, canonical_json, safe_relative_path
 from .quality import HARD_FAIL_CATEGORIES
@@ -32,6 +33,7 @@ REQUIRED_ACCEPTED_CASES = frozenset(
     {"front-full-body-neutral", "three-quarter-readable-hands"}
 )
 MAX_PACKAGE_FILE_BYTES = 256 * 1024 * 1024
+MAX_MODEL_PROFILE_BYTES = 4 * 1024 * 1024
 UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 MODEL_REF_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*@v[0-9]{3}$")
 
@@ -599,11 +601,78 @@ def _append_binding_diagnostics(
             )
 
 
+def selected_model_production_diagnostics(
+    model: dict[str, Any],
+    *,
+    workspace_root: Path,
+) -> list[dict[str, str]]:
+    """Fail closed unless the exact selected model profile is production eligible."""
+
+    try:
+        expanded = workspace_root.expanduser()
+        lexical_root = expanded if expanded.is_absolute() else Path.cwd() / expanded
+        if lexical_root.is_symlink():
+            raise ValueError("workspace root must not be a symlink")
+        root = lexical_root.resolve(strict=True)
+        if not root.is_dir():
+            raise ValueError("workspace root must be a directory")
+        relative = safe_relative_path(str(model.get("profile_path", "")))
+        profile_path = root.joinpath(*relative.parts)
+        if _has_symlink(profile_path, root):
+            raise ValueError("model profile path contains a symlink")
+        resolved = profile_path.resolve(strict=True)
+        resolved.relative_to(root)
+        if not resolved.is_file():
+            raise ValueError("model profile must be a regular file")
+        size = resolved.stat().st_size
+        if size <= 0 or size > MAX_MODEL_PROFILE_BYTES:
+            raise ValueError(
+                f"model profile size must be 1..{MAX_MODEL_PROFILE_BYTES} bytes"
+            )
+        profile = load_document(resolved)
+    except (OSError, ValueError) as exc:
+        return [
+            _diag(
+                "SELECTED_MODEL_PROFILE_READ",
+                str(exc),
+                "selected_model.profile_ref",
+            )
+        ]
+
+    expected_sha = model.get("profile_sha256")
+    actual_sha = canonical_sha256(profile)
+    if expected_sha != actual_sha:
+        return [
+            _diag(
+                "SELECTED_MODEL_PROFILE_BINDING",
+                "selected model profile bytes do not match the benchmark plan",
+                "selected_model.profile_sha256",
+            )
+        ]
+    eligibility = evaluate_model_license_eligibility(profile)
+    if not eligibility.production_eligible:
+        return [
+            _diag(
+                "SELECTED_MODEL_NOT_PRODUCTION_ELIGIBLE",
+                json.dumps(
+                    eligibility.to_dict(),
+                    ensure_ascii=True,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                "selected_model",
+            )
+        ]
+    return []
+
+
 def _append_run_diagnostics(
     diagnostics: list[dict[str, str]],
     review: dict[str, Any],
     results: dict[str, Any],
     plan: dict[str, Any],
+    *,
+    workspace_root: Path,
 ) -> None:
     entries = {
         entry["run_id"]: entry
@@ -652,6 +721,12 @@ def _append_run_diagnostics(
                         f"selected_model.{key}",
                     )
                 )
+        diagnostics.extend(
+            selected_model_production_diagnostics(
+                model,
+                workspace_root=workspace_root,
+            )
+        )
 
     accepted_entries: list[dict[str, Any]] = []
     for run_id in review["accepted_run_ids"]:
@@ -731,7 +806,13 @@ def validate_review(
     manifest, files = build_contact_sheet_package(results, images)
     diagnostics.extend(validate_package(package_root, manifest, files))
     _append_binding_diagnostics(diagnostics, review, plan, results, manifest)
-    _append_run_diagnostics(diagnostics, review, results, plan)
+    _append_run_diagnostics(
+        diagnostics,
+        review,
+        results,
+        plan,
+        workspace_root=workspace_root,
+    )
     diagnostics = _sorted(diagnostics)
     return diagnostics, _selected_lock(review) if not diagnostics else None
 
