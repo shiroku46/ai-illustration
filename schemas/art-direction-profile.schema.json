@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/art-direction-profile.schema.json",
+  "title": "Art direction profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "id",
+    "version",
+    "status",
+    "roles",
+    "global_anti_goals",
+    "visual_references"
+  ],
+  "properties": {
+    "kind": {"const": "art-direction-profile"},
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "version": {"type": "string", "pattern": "^v[0-9]{3}$"},
+    "status": {"enum": ["draft", "reviewing"]},
+    "roles": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {"$ref": "#/$defs/role"},
+      "allOf": [
+        {"contains": {"properties": {"role": {"const": "boke"}}, "required": ["role"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"role": {"const": "tsukkomi"}}, "required": ["role"]}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "global_anti_goals": {
+      "type": "array",
+      "minItems": 8,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$"},
+      "allOf": [
+        {"contains": {"const": "uniform_polished_linework"}},
+        {"contains": {"const": "generic_mobile_game_face"}},
+        {"contains": {"const": "over_rendered_lighting"}},
+        {"contains": {"const": "accidental_architecture_or_background_objects"}},
+        {"contains": {"const": "anatomical_collapse"}},
+        {"contains": {"const": "fused_or_missing_hands_or_limbs"}},
+        {"contains": {"const": "incoherent_clothing"}},
+        {"contains": {"const": "unintended_2_5d_rendering"}}
+      ]
+    },
+    "visual_references": {
+      "type": "array",
+      "minItems": 2,
+      "items": {"$ref": "#/$defs/reference"},
+      "allOf": [
+        {"contains": {"properties": {"role": {"const": "boke"}}, "required": ["role"]}, "minContains": 1},
+        {"contains": {"properties": {"role": {"const": "tsukkomi"}}, "required": ["role"]}, "minContains": 1}
+      ]
+    },
+    "notes": {"type": "string", "minLength": 1}
+  },
+  "$defs": {
+    "nonEmptyText": {"type": "string", "minLength": 1},
+    "textList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/nonEmptyText"}
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "silhouette",
+        "body_ratio",
+        "head_exaggeration",
+        "hand_exaggeration",
+        "foot_exaggeration",
+        "costume_construction",
+        "palette",
+        "line_behavior",
+        "eye_design",
+        "shading_ceiling",
+        "front_full_body_neutral_target",
+        "background_isolation_target",
+        "identity_anchors",
+        "prohibited_ai_traits"
+      ],
+      "properties": {
+        "role": {"enum": ["boke", "tsukkomi"]},
+        "silhouette": {"$ref": "#/$defs/nonEmptyText"},
+        "body_ratio": {"$ref": "#/$defs/nonEmptyText"},
+        "head_exaggeration": {"$ref": "#/$defs/nonEmptyText"},
+        "hand_exaggeration": {"$ref": "#/$defs/nonEmptyText"},
+        "foot_exaggeration": {"$ref": "#/$defs/nonEmptyText"},
+        "costume_construction": {"$ref": "#/$defs/nonEmptyText"},
+        "palette": {"$ref": "#/$defs/textList"},
+        "line_behavior": {"$ref": "#/$defs/nonEmptyText"},
+        "eye_design": {"$ref": "#/$defs/nonEmptyText"},
+        "shading_ceiling": {"$ref": "#/$defs/nonEmptyText"},
+        "front_full_body_neutral_target": {"$ref": "#/$defs/nonEmptyText"},
+        "background_isolation_target": {"$ref": "#/$defs/nonEmptyText"},
+        "identity_anchors": {"$ref": "#/$defs/textList"},
+        "prohibited_ai_traits": {"$ref": "#/$defs/textList"}
+      }
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "path", "media_type", "sha256", "purpose"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "role": {"enum": ["boke", "tsukkomi"]},
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+        },
+        "media_type": {"enum": ["image/png", "image/jpeg", "image/webp"]},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "purpose": {"$ref": "#/$defs/nonEmptyText"}
+      }
+    }
+  }
+}
