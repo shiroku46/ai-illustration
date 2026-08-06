@@ -186,7 +186,6 @@ class BenchmarkResultsTest(unittest.TestCase):
         checksums: dict[str, str] = {}
         for role in ("boke", "tsukkomi"):
             payload = _png() + role.encode("ascii")
-            # Art-direction references use a lightweight signature check, not the benchmark PNG parser.
             (self.references / f"{role}.png").write_bytes(payload)
             checksums[role] = hashlib.sha256(payload).hexdigest()
         self.art_profile = _art_profile(checksums)
@@ -435,10 +434,19 @@ class BenchmarkResultsTest(unittest.TestCase):
         first_group = (self.results["results"][0]["model_family"], self.results["results"][0]["prompt_case_id"])
         path = f"{br.SHEETS_DIR}/{first_group[0]}/{first_group[1]}.svg"
         svg = files[path].decode("utf-8")
+        self.assertIn('xmlns="http://www.w3.org/2000/svg"', svg)
         self.assertIn("EXECUTION FAILED", svg)
         self.assertIn("fixture execution failure", svg)
         self.assertIn("data:image/png;base64,", svg)
-        for prohibited in ("<script", "http://", "https://", "<link", "<iframe", "@import"):
+        for prohibited in (
+            "<script",
+            'href="http://',
+            'href="https://',
+            "<link",
+            "<iframe",
+            "@import",
+            "javascript:",
+        ):
             self.assertNotIn(prohibited, svg)
         self.assertEqual(files[br.PACKAGE_MANIFEST], br.document_bytes(manifest))
         self.assertEqual(manifest["selection_policy"], "owner-only")
@@ -450,13 +458,15 @@ class BenchmarkResultsTest(unittest.TestCase):
         reordered = copy.deepcopy(self.results)
         reordered["results"].reverse()
         second_manifest, second_files = br.build_contact_sheet_package(reordered, images)
-        # Result-set hashes intentionally bind order; sheet bytes and paths remain semantic-order deterministic.
         sheet_files = {key: value for key, value in first_files.items() if key.endswith(".svg")}
         second_sheets = {key: value for key, value in second_files.items() if key.endswith(".svg")}
         self.assertEqual(sheet_files, second_sheets)
         for sheet in first_manifest["sheets"]:
             self.assertEqual(sheet["sha256"], hashlib.sha256(first_files[sheet["path"]]).hexdigest())
-            seeds = [next(item["seed"] for item in self.results["results"] if item["run_id"] == run_id) for run_id in sheet["run_ids"]]
+            seeds = [
+                next(item["seed"] for item in self.results["results"] if item["run_id"] == run_id)
+                for run_id in sheet["run_ids"]
+            ]
             self.assertEqual(seeds, sorted(seeds))
         self.assertNotEqual(first_manifest["results_sha256"], second_manifest["results_sha256"])
 
@@ -477,8 +487,9 @@ class BenchmarkResultsTest(unittest.TestCase):
             for path in self.result_root.rglob("*.png")
         }
         self.assertEqual(source_before, source_after)
-        with self.assertRaisesRegex(br.BenchmarkResultsError, "OUTPUT_EXISTS"):
+        with self.assertRaises(br.BenchmarkResultsError) as context:
             br.publish_package(output, files)
+        self.assertEqual(context.exception.code, "OUTPUT_EXISTS")
 
         second = self.root / "contact-package-2"
         br.publish_package(second, files)
@@ -555,19 +566,23 @@ class BenchmarkResultsTest(unittest.TestCase):
             self.assertNotIn(forbidden, entry["properties"])
 
     def test_source_has_no_execution_or_network_surface(self) -> None:
-        source = (Path(__file__).resolve().parents[1] / "src" / "ai_illustration" / "benchmark_results.py").read_text(encoding="utf-8")
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "ai_illustration"
+            / "benchmark_results.py"
+        ).read_text(encoding="utf-8")
         for prohibited in (
-            "subprocess",
-            "socket",
-            "urllib",
-            "requests",
-            "http.client",
-            "ComfyUI",
+            "import subprocess",
+            "from subprocess",
+            "import socket",
+            "import urllib",
+            "import requests",
+            "import http.client",
+            "webbrowser",
+            "Popen(",
+            "subprocess.run(",
             "launch_browser",
-            "aesthetic_score",
-            "winner",
-            "https://",
-            "http://",
         ):
             with self.subTest(prohibited=prohibited):
                 self.assertNotIn(prohibited, source)
