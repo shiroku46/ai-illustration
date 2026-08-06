@@ -10,6 +10,7 @@ import re
 import sys
 from typing import Any, Iterable, Sequence
 
+from .benchmark_workflow import validate_workflow_bytes
 from .catalog import evaluate_model_license_eligibility, validate_tool_profile
 from .naming import SHA256_RE, TOKEN_RE, VERSION_RE, canonical_json, safe_relative_path
 
@@ -17,6 +18,7 @@ MANIFEST_KIND = "model-install-manifest"
 SCHEMA_VERSION = "1.0"
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 MAX_PROFILE_BYTES = 4 * 1024 * 1024
+MAX_WORKFLOW_BYTES = 4 * 1024 * 1024
 MODEL_REF_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*@v[0-9]{3}$")
 SETTING_TOKEN_RE = re.compile(r"^[a-z0-9]+(?:[_-][a-z0-9]+)*$")
 BENCHMARK_SCOPES = frozenset({"production-candidate", "evaluation-only"})
@@ -52,7 +54,7 @@ ARTIFACT_FIELDS = frozenset(
 SETTINGS_FIELDS = frozenset(
     {"width", "height", "steps", "cfg", "sampler", "scheduler", "prompt_format", "settings_basis"}
 )
-WORKFLOW_FIELDS = frozenset({"status", "expected_api_path"})
+WORKFLOW_FIELDS = frozenset({"status", "path", "sha256"})
 
 
 def _diag(code: str, message: str, field: str = "") -> dict[str, str]:
@@ -118,34 +120,49 @@ def _has_symlink(path: Path, stop: Path) -> bool:
         current = current.parent
 
 
-def _load_relative_json(
+def _read_relative(
     root: Path,
     relative: Any,
     *,
     field: str,
-    max_bytes: int,
-) -> tuple[dict[str, Any] | None, Path | None, list[dict[str, str]]]:
+    maximum: int,
+    error_code: str,
+) -> tuple[Path | None, bytes | None, list[dict[str, str]]]:
     if not isinstance(relative, str):
-        return None, None, [_diag("PATH_REQUIRED", "must be a relative path", field)]
+        return None, None, [_diag(error_code, "must be a relative path", field)]
     try:
         safe = safe_relative_path(relative)
-        path = root.joinpath(*safe.parts)
-        if _has_symlink(path, root):
+        lexical = root.joinpath(*safe.parts)
+        if _has_symlink(lexical, root):
             raise ValueError("path contains a symlink")
-        resolved = path.resolve(strict=True)
+        resolved = lexical.resolve(strict=True)
         resolved.relative_to(root)
-        if not resolved.is_file():
-            raise ValueError("path must identify a regular file")
+        if not resolved.is_file() or resolved.is_symlink():
+            raise ValueError("path must identify a regular non-symlink file")
         size = resolved.stat().st_size
-        if size <= 0 or size > max_bytes:
-            raise ValueError(f"file size must be 1..{max_bytes} bytes")
+        if size <= 0 or size > maximum:
+            raise ValueError(f"file size must be 1..{maximum} bytes")
         payload = resolved.read_bytes()
+        if len(payload) != size:
+            raise ValueError("file changed while being read")
+    except (OSError, ValueError) as exc:
+        return None, None, [_diag(error_code, str(exc), field)]
+    return resolved, payload, []
+
+
+def _json_object(
+    payload: bytes,
+    *,
+    field: str,
+    error_code: str,
+) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
+    try:
         document = json.loads(payload.decode("utf-8"))
-        if not isinstance(document, dict):
-            raise ValueError("JSON root must be an object")
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
-        return None, None, [_diag("DOCUMENT_READ", str(exc), field)]
-    return document, resolved, []
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        return None, [_diag(error_code, str(exc), field)]
+    if not isinstance(document, dict):
+        return None, [_diag(error_code, "JSON root must be an object", field)]
+    return document, []
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
@@ -154,8 +171,8 @@ def load_manifest(path: Path) -> dict[str, Any]:
     if lexical.is_symlink():
         raise ValueError("manifest path must not be a symlink")
     resolved = lexical.resolve(strict=True)
-    if not resolved.is_file():
-        raise ValueError("manifest path must be a regular file")
+    if not resolved.is_file() or resolved.is_symlink():
+        raise ValueError("manifest path must be a regular non-symlink file")
     size = resolved.stat().st_size
     if size <= 0 or size > MAX_MANIFEST_BYTES:
         raise ValueError(f"manifest size must be 1..{MAX_MANIFEST_BYTES} bytes")
@@ -187,8 +204,15 @@ def _validate_settings(settings: Any, field: str) -> list[dict[str, str]]:
         return diagnostics
     for name in ("width", "height"):
         value = settings.get(name)
-        if not isinstance(value, int) or isinstance(value, bool) or not 256 <= value <= 2048 or value % 64:
-            diagnostics.append(_diag("IMAGE_DIMENSION", "must be a multiple of 64 in 256..2048", f"{field}.{name}"))
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or not 256 <= value <= 2048
+            or value % 64
+        ):
+            diagnostics.append(
+                _diag("IMAGE_DIMENSION", "must be a multiple of 64 in 256..2048", f"{field}.{name}")
+            )
     steps = settings.get("steps")
     if not isinstance(steps, int) or isinstance(steps, bool) or not 1 <= steps <= 100:
         diagnostics.append(_diag("STEPS", "must be an integer in 1..100", f"{field}.steps"))
@@ -206,25 +230,38 @@ def _validate_settings(settings: Any, field: str) -> list[dict[str, str]]:
     return diagnostics
 
 
-def _validate_workflow(workflow: Any, field: str) -> tuple[list[dict[str, str]], str | None]:
+def _validate_workflow_binding(
+    workflow: Any,
+    field: str,
+) -> tuple[list[dict[str, str]], str | None]:
     diagnostics = _fields(workflow, WORKFLOW_FIELDS, field)
     if not isinstance(workflow, dict):
         return diagnostics, None
-    if workflow.get("status") != "human-export-required":
-        diagnostics.append(_diag("WORKFLOW_STATUS", "status must be human-export-required", f"{field}.status"))
-    path_value = workflow.get("expected_api_path")
+    if workflow.get("status") != "repository-template":
+        diagnostics.append(
+            _diag("WORKFLOW_STATUS", "status must be repository-template", f"{field}.status")
+        )
+    path_value = workflow.get("path")
     safe_path: str | None = None
     try:
         safe = safe_relative_path(path_value)
         safe_path = safe.as_posix()
-        if not safe_path.startswith("local/benchmark-workflows/") or not safe_path.endswith(".json"):
-            raise ValueError("workflow path must be local/benchmark-workflows/*.json")
+        if not safe_path.startswith("benchmark/workflows/") or not safe_path.endswith(".api.json"):
+            raise ValueError("workflow path must be benchmark/workflows/*.api.json")
     except (TypeError, ValueError) as exc:
-        diagnostics.append(_diag("WORKFLOW_PATH", str(exc), f"{field}.expected_api_path"))
+        diagnostics.append(_diag("WORKFLOW_PATH", str(exc), f"{field}.path"))
+    checksum = workflow.get("sha256")
+    if not isinstance(checksum, str) or not SHA256_RE.fullmatch(checksum):
+        diagnostics.append(
+            _diag("WORKFLOW_CHECKSUM", "sha256 must be lowercase hexadecimal", f"{field}.sha256")
+        )
     return diagnostics, safe_path
 
 
-def _validate_artifact(artifact: Any, field: str) -> tuple[list[dict[str, str]], tuple[str, str] | None, str | None]:
+def _validate_artifact(
+    artifact: Any,
+    field: str,
+) -> tuple[list[dict[str, str]], tuple[str, str] | None, str | None]:
     diagnostics = _fields(artifact, ARTIFACT_FIELDS, field)
     if not isinstance(artifact, dict):
         return diagnostics, None, None
@@ -239,7 +276,13 @@ def _validate_artifact(artifact: Any, field: str) -> tuple[list[dict[str, str]],
     if not isinstance(source_url, str) or not source_url.startswith("https://"):
         diagnostics.append(_diag("SOURCE_URL", "source URL must use https", f"{field}.source_url"))
     filename = artifact.get("filename")
-    if not isinstance(filename, str) or not filename or Path(filename).name != filename or "/" in filename or "\\" in filename:
+    if (
+        not isinstance(filename, str)
+        or not filename
+        or Path(filename).name != filename
+        or "/" in filename
+        or "\\" in filename
+    ):
         diagnostics.append(_diag("FILENAME", "filename must be one basename", f"{field}.filename"))
     destination = artifact.get("destination")
     if destination != expected_destination:
@@ -257,7 +300,9 @@ def _validate_artifact(artifact: Any, field: str) -> tuple[list[dict[str, str]],
     if not isinstance(checksum, str) or not SHA256_RE.fullmatch(checksum):
         diagnostics.append(_diag("CHECKSUM", "sha256 must be lowercase hexadecimal", f"{field}.sha256"))
     if artifact.get("required") is not True:
-        diagnostics.append(_diag("REQUIRED_ARTIFACT", "all manifest artifacts must be required", f"{field}.required"))
+        diagnostics.append(
+            _diag("REQUIRED_ARTIFACT", "all manifest artifacts must be required", f"{field}.required")
+        )
     install_key = (str(destination), str(filename)) if destination and filename else None
     return diagnostics, install_key, artifact_id if isinstance(artifact_id, str) else None
 
@@ -276,7 +321,9 @@ def validate_manifest(
         diagnostics.append(_diag("SCHEMA_VERSION", "schema_version must be 1.0", "schema_version"))
     if not isinstance(manifest.get("id"), str) or not TOKEN_RE.fullmatch(manifest.get("id", "")):
         diagnostics.append(_diag("INVALID_ID", "id must be a lowercase ASCII token", "id"))
-    if not isinstance(manifest.get("version"), str) or not VERSION_RE.fullmatch(manifest.get("version", "")):
+    if not isinstance(manifest.get("version"), str) or not VERSION_RE.fullmatch(
+        manifest.get("version", "")
+    ):
         diagnostics.append(_diag("INVALID_VERSION", "version must use vNNN", "version"))
     diagnostics.extend(_validate_target(manifest.get("target")))
     root, root_diagnostics = _resolve_root(workspace_root)
@@ -308,89 +355,206 @@ def validate_manifest(
             diagnostics.append(_diag("DUPLICATE_FAMILY", f"duplicate family: {family}", f"{field}.family"))
         else:
             families.add(family)
+
         profile_ref = model.get("profile_ref")
         if not isinstance(profile_ref, str) or not MODEL_REF_RE.fullmatch(profile_ref):
             diagnostics.append(_diag("PROFILE_REF", "profile_ref must use id@vNNN", f"{field}.profile_ref"))
         elif profile_ref in refs:
-            diagnostics.append(_diag("DUPLICATE_PROFILE", f"duplicate profile_ref: {profile_ref}", f"{field}.profile_ref"))
+            diagnostics.append(
+                _diag("DUPLICATE_PROFILE", f"duplicate profile_ref: {profile_ref}", f"{field}.profile_ref")
+            )
         else:
             refs.add(profile_ref)
+
         profile_sha = model.get("profile_sha256")
         if not isinstance(profile_sha, str) or not SHA256_RE.fullmatch(profile_sha):
-            diagnostics.append(_diag("CHECKSUM", "profile_sha256 must be lowercase hexadecimal", f"{field}.profile_sha256"))
+            diagnostics.append(
+                _diag("CHECKSUM", "profile_sha256 must be lowercase hexadecimal", f"{field}.profile_sha256")
+            )
+
         scope = model.get("benchmark_scope")
         if scope not in BENCHMARK_SCOPES:
-            diagnostics.append(_diag("BENCHMARK_SCOPE", "unsupported benchmark scope", f"{field}.benchmark_scope"))
+            diagnostics.append(
+                _diag("BENCHMARK_SCOPE", "unsupported benchmark scope", f"{field}.benchmark_scope")
+            )
 
         profile_path_value = model.get("profile_path")
         if isinstance(profile_path_value, str):
             if profile_path_value in profile_paths:
-                diagnostics.append(_diag("DUPLICATE_PROFILE_PATH", "profile path is duplicated", f"{field}.profile_path"))
+                diagnostics.append(
+                    _diag("DUPLICATE_PROFILE_PATH", "profile path is duplicated", f"{field}.profile_path")
+                )
             profile_paths.add(profile_path_value)
 
         eligibility_dict: dict[str, Any] | None = None
-        profile: dict[str, Any] | None = None
         if root is not None:
-            profile, resolved_profile, read_diagnostics = _load_relative_json(
+            profile_path, profile_payload, read_diagnostics = _read_relative(
                 root,
                 profile_path_value,
                 field=f"{field}.profile_path",
-                max_bytes=MAX_PROFILE_BYTES,
+                maximum=MAX_PROFILE_BYTES,
+                error_code="DOCUMENT_READ",
             )
             diagnostics.extend(read_diagnostics)
-            if profile is not None and resolved_profile is not None:
-                diagnostics.extend(
-                    {
-                        "code": item.code,
-                        "message": item.message,
-                        "field": f"{field}.profile_path:{item.field}" if item.field else f"{field}.profile_path",
-                    }
-                    for item in validate_tool_profile(resolved_profile, profile)
+            if profile_path is not None and profile_payload is not None:
+                profile, json_diagnostics = _json_object(
+                    profile_payload,
+                    field=f"{field}.profile_path",
+                    error_code="DOCUMENT_READ",
                 )
-                expected_ref = f"{profile.get('id')}@{profile.get('version')}"
-                if profile_ref != expected_ref:
-                    diagnostics.append(_diag("PROFILE_REF_BINDING", "profile_ref does not match profile bytes", f"{field}.profile_ref"))
-                actual_sha = _canonical_sha256(profile)
-                if profile_sha != actual_sha:
-                    diagnostics.append(_diag("PROFILE_SHA_BINDING", "profile_sha256 does not match profile bytes", f"{field}.profile_sha256"))
-                eligibility = evaluate_model_license_eligibility(profile)
-                eligibility_dict = eligibility.to_dict()
-                if not eligibility.benchmark_eligible:
-                    diagnostics.append(_diag("MODEL_NOT_BENCHMARK_ELIGIBLE", json.dumps(eligibility_dict, sort_keys=True, separators=(",", ":")), field))
-                if scope == "production-candidate" and not eligibility.production_eligible:
-                    diagnostics.append(_diag("SCOPE_PRODUCTION_MISMATCH", "production-candidate must be production eligible", f"{field}.benchmark_scope"))
-                if scope == "evaluation-only" and eligibility.production_eligible:
-                    diagnostics.append(_diag("SCOPE_EVALUATION_MISMATCH", "evaluation-only must not be production eligible", f"{field}.benchmark_scope"))
-                if not eligibility.commercial_output_eligible:
-                    diagnostics.append(_diag("OUTPUT_SCOPE", "benchmark profile requires approved commercial output use", field))
-                if target:
-                    if profile.get("adapter_type") != target.get("adapter_type"):
-                        diagnostics.append(_diag("TARGET_ADAPTER", "profile adapter differs from manifest target", f"{field}.profile_path"))
-                    if profile.get("runtime_type") != target.get("runtime_type"):
-                        diagnostics.append(_diag("TARGET_RUNTIME", "profile runtime differs from manifest target", f"{field}.profile_path"))
-                    if target.get("operating_system") not in profile.get("supported_operating_systems", []):
-                        diagnostics.append(_diag("TARGET_OS", "profile does not support target operating system", f"{field}.profile_path"))
-                    if _number(profile.get("minimum_ram_gb")) and _number(target.get("minimum_ram_gb")) and target["minimum_ram_gb"] < profile["minimum_ram_gb"]:
-                        diagnostics.append(_diag("TARGET_RAM", "manifest target RAM is below profile minimum", f"{field}.profile_path"))
-                    if _number(profile.get("minimum_vram_gb")) and _number(target.get("minimum_vram_gb")) and target["minimum_vram_gb"] < profile["minimum_vram_gb"]:
-                        diagnostics.append(_diag("TARGET_VRAM", "manifest target VRAM is below profile minimum", f"{field}.profile_path"))
+                diagnostics.extend(json_diagnostics)
+                if profile is not None:
+                    diagnostics.extend(
+                        {
+                            "code": item.code,
+                            "message": item.message,
+                            "field": (
+                                f"{field}.profile_path:{item.field}"
+                                if item.field
+                                else f"{field}.profile_path"
+                            ),
+                        }
+                        for item in validate_tool_profile(profile_path, profile)
+                    )
+                    expected_ref = f"{profile.get('id')}@{profile.get('version')}"
+                    if profile_ref != expected_ref:
+                        diagnostics.append(
+                            _diag(
+                                "PROFILE_REF_BINDING",
+                                "profile_ref does not match profile bytes",
+                                f"{field}.profile_ref",
+                            )
+                        )
+                    if profile_sha != _canonical_sha256(profile):
+                        diagnostics.append(
+                            _diag(
+                                "PROFILE_SHA_BINDING",
+                                "profile_sha256 does not match profile bytes",
+                                f"{field}.profile_sha256",
+                            )
+                        )
+                    eligibility = evaluate_model_license_eligibility(profile)
+                    eligibility_dict = eligibility.to_dict()
+                    if not eligibility.benchmark_eligible:
+                        diagnostics.append(
+                            _diag(
+                                "MODEL_NOT_BENCHMARK_ELIGIBLE",
+                                json.dumps(
+                                    eligibility_dict,
+                                    sort_keys=True,
+                                    separators=(",", ":"),
+                                ),
+                                field,
+                            )
+                        )
+                    if scope == "production-candidate" and not eligibility.production_eligible:
+                        diagnostics.append(
+                            _diag(
+                                "SCOPE_PRODUCTION_MISMATCH",
+                                "production-candidate must be production eligible",
+                                f"{field}.benchmark_scope",
+                            )
+                        )
+                    if scope == "evaluation-only" and eligibility.production_eligible:
+                        diagnostics.append(
+                            _diag(
+                                "SCOPE_EVALUATION_MISMATCH",
+                                "evaluation-only must not be production eligible",
+                                f"{field}.benchmark_scope",
+                            )
+                        )
+                    if not eligibility.commercial_output_eligible:
+                        diagnostics.append(
+                            _diag(
+                                "OUTPUT_SCOPE",
+                                "benchmark profile requires approved commercial output use",
+                                field,
+                            )
+                        )
+                    if target:
+                        if profile.get("adapter_type") != target.get("adapter_type"):
+                            diagnostics.append(
+                                _diag(
+                                    "TARGET_ADAPTER",
+                                    "profile adapter differs from manifest target",
+                                    f"{field}.profile_path",
+                                )
+                            )
+                        if profile.get("runtime_type") != target.get("runtime_type"):
+                            diagnostics.append(
+                                _diag(
+                                    "TARGET_RUNTIME",
+                                    "profile runtime differs from manifest target",
+                                    f"{field}.profile_path",
+                                )
+                            )
+                        if target.get("operating_system") not in profile.get(
+                            "supported_operating_systems", []
+                        ):
+                            diagnostics.append(
+                                _diag(
+                                    "TARGET_OS",
+                                    "profile does not support target operating system",
+                                    f"{field}.profile_path",
+                                )
+                            )
+                        if (
+                            _number(profile.get("minimum_ram_gb"))
+                            and _number(target.get("minimum_ram_gb"))
+                            and target["minimum_ram_gb"] < profile["minimum_ram_gb"]
+                        ):
+                            diagnostics.append(
+                                _diag(
+                                    "TARGET_RAM",
+                                    "manifest target RAM is below profile minimum",
+                                    f"{field}.profile_path",
+                                )
+                            )
+                        if (
+                            _number(profile.get("minimum_vram_gb"))
+                            and _number(target.get("minimum_vram_gb"))
+                            and target["minimum_vram_gb"] < profile["minimum_vram_gb"]
+                        ):
+                            diagnostics.append(
+                                _diag(
+                                    "TARGET_VRAM",
+                                    "manifest target VRAM is below profile minimum",
+                                    f"{field}.profile_path",
+                                )
+                            )
 
         artifacts = model.get("artifacts")
         artifact_summaries: list[dict[str, Any]] = []
         if not isinstance(artifacts, list) or not artifacts:
-            diagnostics.append(_diag("ARTIFACTS", "at least one artifact is required", f"{field}.artifacts"))
+            diagnostics.append(
+                _diag("ARTIFACTS", "at least one artifact is required", f"{field}.artifacts")
+            )
         else:
             for artifact_index, artifact in enumerate(artifacts):
                 artifact_field = f"{field}.artifacts[{artifact_index}]"
-                artifact_diagnostics, install_key, artifact_id = _validate_artifact(artifact, artifact_field)
+                artifact_diagnostics, install_key, artifact_id = _validate_artifact(
+                    artifact, artifact_field
+                )
                 diagnostics.extend(artifact_diagnostics)
                 if artifact_id:
                     if artifact_id in artifact_ids:
-                        diagnostics.append(_diag("DUPLICATE_ARTIFACT", f"duplicate artifact ID: {artifact_id}", f"{artifact_field}.id"))
+                        diagnostics.append(
+                            _diag(
+                                "DUPLICATE_ARTIFACT",
+                                f"duplicate artifact ID: {artifact_id}",
+                                f"{artifact_field}.id",
+                            )
+                        )
                     artifact_ids.add(artifact_id)
                 if install_key:
                     if install_key in install_keys:
-                        diagnostics.append(_diag("DUPLICATE_INSTALL_TARGET", "destination and filename are duplicated", artifact_field))
+                        diagnostics.append(
+                            _diag(
+                                "DUPLICATE_INSTALL_TARGET",
+                                "destination and filename are duplicated",
+                                artifact_field,
+                            )
+                        )
                     install_keys.add(install_key)
                 if isinstance(artifact, dict):
                     artifact_summaries.append(
@@ -403,13 +567,54 @@ def validate_manifest(
                         }
                     )
 
-        diagnostics.extend(_validate_settings(model.get("benchmark_settings"), f"{field}.benchmark_settings"))
-        workflow_diagnostics, workflow_path = _validate_workflow(model.get("workflow"), f"{field}.workflow")
+        diagnostics.extend(
+            _validate_settings(model.get("benchmark_settings"), f"{field}.benchmark_settings")
+        )
+        workflow_diagnostics, workflow_path_value = _validate_workflow_binding(
+            model.get("workflow"), f"{field}.workflow"
+        )
         diagnostics.extend(workflow_diagnostics)
-        if workflow_path:
-            if workflow_path in workflow_paths:
-                diagnostics.append(_diag("DUPLICATE_WORKFLOW", "workflow path is duplicated", f"{field}.workflow.expected_api_path"))
-            workflow_paths.add(workflow_path)
+        workflow_summary: dict[str, Any] | None = None
+        if workflow_path_value:
+            if workflow_path_value in workflow_paths:
+                diagnostics.append(
+                    _diag(
+                        "DUPLICATE_WORKFLOW",
+                        "workflow path is duplicated",
+                        f"{field}.workflow.path",
+                    )
+                )
+            workflow_paths.add(workflow_path_value)
+            if root is not None:
+                _, workflow_payload, read_diagnostics = _read_relative(
+                    root,
+                    workflow_path_value,
+                    field=f"{field}.workflow.path",
+                    maximum=MAX_WORKFLOW_BYTES,
+                    error_code="WORKFLOW_READ",
+                )
+                diagnostics.extend(read_diagnostics)
+                if workflow_payload is not None:
+                    expected_workflow_sha = (
+                        model.get("workflow", {}).get("sha256")
+                        if isinstance(model.get("workflow"), dict)
+                        else None
+                    )
+                    actual_workflow_sha = hashlib.sha256(workflow_payload).hexdigest()
+                    if expected_workflow_sha != actual_workflow_sha:
+                        diagnostics.append(
+                            _diag(
+                                "WORKFLOW_SHA_BINDING",
+                                "workflow sha256 does not match exact bytes",
+                                f"{field}.workflow.sha256",
+                            )
+                        )
+                    template_diagnostics, workflow_summary = validate_workflow_bytes(
+                        workflow_payload,
+                        model,
+                        field=f"{field}.workflow.template",
+                    )
+                    diagnostics.extend(template_diagnostics)
 
         summaries.append(
             {
@@ -418,16 +623,29 @@ def validate_manifest(
                 "profile_sha256": profile_sha,
                 "benchmark_scope": scope,
                 "eligibility": eligibility_dict,
-                "artifacts": sorted(artifact_summaries, key=lambda item: str(item.get("id", ""))),
-                "workflow_status": model.get("workflow", {}).get("status") if isinstance(model.get("workflow"), dict) else None,
-                "expected_api_path": workflow_path,
+                "artifacts": sorted(
+                    artifact_summaries, key=lambda item: str(item.get("id", ""))
+                ),
+                "workflow_status": (
+                    model.get("workflow", {}).get("status")
+                    if isinstance(model.get("workflow"), dict)
+                    else None
+                ),
+                "workflow_path": workflow_path_value,
+                "workflow_summary": workflow_summary,
             }
         )
 
-    return _sorted(diagnostics), sorted(summaries, key=lambda item: str(item.get("family", "")))
+    return _sorted(diagnostics), sorted(
+        summaries, key=lambda item: str(item.get("family", ""))
+    )
 
 
-def result_document(manifest: dict[str, Any], diagnostics: list[dict[str, str]], summaries: list[dict[str, Any]]) -> dict[str, Any]:
+def result_document(
+    manifest: dict[str, Any],
+    diagnostics: list[dict[str, str]],
+    summaries: list[dict[str, Any]],
+) -> dict[str, Any]:
     return {
         "ok": not diagnostics,
         "manifest_id": manifest.get("id"),
@@ -439,7 +657,9 @@ def result_document(manifest: dict[str, Any], diagnostics: list[dict[str, str]],
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Validate exact model installation evidence without mutation")
+    parser = argparse.ArgumentParser(
+        description="Validate exact model installation evidence without mutation"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     command = sub.add_parser("check")
     command.add_argument("manifest", type=Path)
@@ -451,7 +671,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         manifest = load_manifest(args.manifest)
-        diagnostics, summaries = validate_manifest(manifest, workspace_root=args.workspace_root)
+        diagnostics, summaries = validate_manifest(
+            manifest, workspace_root=args.workspace_root
+        )
         output = result_document(manifest, diagnostics, summaries)
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         output = {
@@ -462,7 +684,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             "models": [],
             "diagnostics": [_diag("ERROR", str(exc))],
         }
-    print(json.dumps(output, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
+    print(
+        json.dumps(
+            output,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
     return 0 if output["ok"] else 1
 
 

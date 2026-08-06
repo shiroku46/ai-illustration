@@ -1,0 +1,141 @@
+{
+  "1": {
+    "inputs": {
+      "unet_name": "anima-aesthetic-v1.1.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Exact Anima diffusion model"
+    }
+  },
+  "2": {
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "shift": 3.0
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "Official Anima sampling shift"
+    }
+  },
+  "3": {
+    "inputs": {
+      "clip_name": "qwen_3_06b_base.safetensors",
+      "type": "stable_diffusion",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Exact Anima text encoder"
+    }
+  },
+  "4": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Exact Anima VAE"
+    }
+  },
+  "5": {
+    "inputs": {
+      "text": "masterpiece, best quality, score_7, safe, A full-body anime illustration of a young woman standing front-facing on a simple white background, with readable hands, coherent tailored clothing, uneven hand-drawn linework, flat colors, and no more than one simple shadow layer.",
+      "clip": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Positive prompt"
+    }
+  },
+  "6": {
+    "inputs": {
+      "text": "worst quality, low quality, score_1, score_2, score_3, bad anatomy, malformed hands, fused fingers, missing limbs, extra limbs, broken joints, incoherent clothing, generic mobile game face, 3d, photorealistic, over-rendered lighting, detailed architecture, busy background",
+      "clip": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Negative prompt"
+    }
+  },
+  "7": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Benchmark canvas"
+    }
+  },
+  "8": {
+    "inputs": {
+      "seed": 101,
+      "steps": 40,
+      "cfg": 4.5,
+      "sampler_name": "er_sde",
+      "scheduler": "simple",
+      "denoise": 1.0,
+      "model": [
+        "2",
+        0
+      ],
+      "positive": [
+        "5",
+        0
+      ],
+      "negative": [
+        "6",
+        0
+      ],
+      "latent_image": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "Fixed benchmark sampler"
+    }
+  },
+  "9": {
+    "inputs": {
+      "samples": [
+        "8",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "Decode"
+    }
+  },
+  "10": {
+    "inputs": {
+      "filename_prefix": "ai-illustration-benchmark/anima-aesthetic/template",
+      "images": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Benchmark output"
+    }
+  }
+}
