@@ -1,0 +1,39 @@
+{
+  "kind": "tool-profile",
+  "schema_version": "1.0",
+  "id": "animagine-xl-4-0-opt",
+  "version": "v001",
+  "profile_type": "model-configuration",
+  "adapter_type": "comfyui",
+  "runtime_type": "pytorch",
+  "offline_capability": "yes",
+  "deterministic_seed_support": true,
+  "control_capabilities": [
+    "fixed-seed",
+    "text-to-image"
+  ],
+  "minimum_vram_gb": 8,
+  "minimum_ram_gb": 16,
+  "supported_operating_systems": [
+    "windows"
+  ],
+  "install_state": "uninstalled",
+  "evidence_references": [
+    {
+      "source_url": "https://huggingface.co/cagliostrolab/animagine-xl-4.0",
+      "retrieved_at": "2026-08-06",
+      "claim": "Official model card records Animagine XL 4.0 Opt, tag-oriented prompting, 1024x1024 reference resolution, Euler Ancestral, CFG 5, 25-28 steps, and OpenRAIL++ licensing."
+    },
+    {
+      "source_url": "https://huggingface.co/cagliostrolab/animagine-xl-4.0/blob/main/animagine-xl-4.0-opt.safetensors",
+      "retrieved_at": "2026-08-06",
+      "claim": "Exact checkpoint filename animagine-xl-4.0-opt.safetensors; size 6940833562 bytes; SHA-256 6327eca98bfb6538dd7a4edce22484a1bbc57a8cff6b11d075d40da1afb847ac."
+    }
+  ],
+  "license_evidence_state": "approved",
+  "commercial_use_review_state": "approved",
+  "decision_state": "approved",
+  "benchmark_use_review_state": "approved",
+  "production_model_use_review_state": "approved",
+  "commercial_output_use_review_state": "approved"
+}
