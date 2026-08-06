@@ -86,8 +86,11 @@
     },
     {
       "if": {
-        "properties": {"profile_type": {"const": "model-configuration"}},
-        "required": ["profile_type"]
+        "anyOf": [
+          {"required": ["benchmark_use_review_state"]},
+          {"required": ["production_model_use_review_state"]},
+          {"required": ["commercial_output_use_review_state"]}
+        ]
       },
       "then": {
         "required": [
@@ -103,7 +106,13 @@
           "profile_type": {"const": "model-configuration"},
           "decision_state": {"const": "approved"}
         },
-        "required": ["profile_type", "decision_state"]
+        "required": [
+          "profile_type",
+          "decision_state",
+          "benchmark_use_review_state",
+          "production_model_use_review_state",
+          "commercial_output_use_review_state"
+        ]
       },
       "then": {
         "properties": {
