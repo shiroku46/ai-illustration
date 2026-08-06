@@ -14,13 +14,14 @@ from ai_illustration import model_install_manifest as mim
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "benchmark" / "model-install-manifest.v001.json"
 PROFILE_ROOT = ROOT / "benchmark" / "model-profiles"
+WORKFLOW_ROOT = ROOT / "benchmark" / "workflows"
 
 
 class ModelInstallManifestTest(unittest.TestCase):
     def setUp(self) -> None:
         self.manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
-    def test_real_manifest_and_profiles_are_valid(self) -> None:
+    def test_real_manifest_profiles_and_workflows_are_valid(self) -> None:
         diagnostics, models = mim.validate_manifest(self.manifest, workspace_root=ROOT)
         self.assertEqual([], diagnostics)
         self.assertEqual(
@@ -32,9 +33,17 @@ class ModelInstallManifestTest(unittest.TestCase):
         self.assertTrue(by_family["anima-aesthetic"]["eligibility"]["benchmark_eligible"])
         self.assertFalse(by_family["anima-aesthetic"]["eligibility"]["production_eligible"])
         self.assertTrue(by_family["anima-aesthetic"]["eligibility"]["commercial_output_eligible"])
+        self.assertEqual("simple", by_family["anima-aesthetic"]["workflow_summary"]["scheduler"])
         for family in ("animagine-xl", "illustrious-xl"):
             self.assertEqual("production-candidate", by_family[family]["benchmark_scope"])
             self.assertTrue(by_family[family]["eligibility"]["production_eligible"])
+            self.assertEqual("normal", by_family[family]["workflow_summary"]["scheduler"])
+        for model in models:
+            self.assertEqual("repository-template", model["workflow_status"])
+            self.assertTrue(model["workflow_path"].startswith("benchmark/workflows/"))
+            self.assertEqual(101, model["workflow_summary"]["seed"])
+            self.assertEqual(1024, model["workflow_summary"]["width"])
+            self.assertEqual(1024, model["workflow_summary"]["height"])
 
     def test_exact_artifact_checksums_and_destinations(self) -> None:
         expected = {
@@ -66,6 +75,17 @@ class ModelInstallManifestTest(unittest.TestCase):
         }
         self.assertEqual(expected, actual)
 
+    def test_exact_workflow_checksums_are_bound(self) -> None:
+        expected = {
+            "animagine-xl": "e45b7f2c8acf4f1e5167025d722075d068664ba98611be2efa7740fb93a6cfaf",
+            "illustrious-xl": "eaab0b4bf5577488d8b6ac472ecfadb7ca00352d45570b9ce5bb860a099f0e9b",
+            "anima-aesthetic": "bbb0ea8189fb7aba637117c7c1ea56dedb4a0510e9ab1932334d5b460335e248",
+        }
+        self.assertEqual(
+            expected,
+            {model["family"]: model["workflow"]["sha256"] for model in self.manifest["models"]},
+        )
+
     def test_profile_change_and_scope_mismatch_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -81,6 +101,20 @@ class ModelInstallManifestTest(unittest.TestCase):
             diagnostics, _ = mim.validate_manifest(scope, workspace_root=root)
             self.assertTrue(any(item["code"] == "SCOPE_PRODUCTION_MISMATCH" for item in diagnostics))
 
+    def test_workflow_change_and_manifest_hash_mismatch_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shutil.copytree(ROOT / "benchmark", root / "benchmark")
+            path = root / "benchmark" / "workflows" / "animagine-xl.api.json"
+            path.write_bytes(path.read_bytes() + b"\n")
+            diagnostics, _ = mim.validate_manifest(self.manifest, workspace_root=root)
+            self.assertTrue(any(item["code"] == "WORKFLOW_SHA_BINDING" for item in diagnostics))
+
+            changed = copy.deepcopy(self.manifest)
+            changed["models"][0]["workflow"]["sha256"] = "0" * 64
+            diagnostics, _ = mim.validate_manifest(changed, workspace_root=ROOT)
+            self.assertTrue(any(item["code"] == "WORKFLOW_SHA_BINDING" for item in diagnostics))
+
     def test_duplicates_and_unsafe_workflow_fail_closed(self) -> None:
         duplicate = copy.deepcopy(self.manifest)
         duplicate["models"][1]["family"] = duplicate["models"][0]["family"]
@@ -93,27 +127,45 @@ class ModelInstallManifestTest(unittest.TestCase):
         self.assertIn("DUPLICATE_INSTALL_TARGET", codes)
 
         unsafe = copy.deepcopy(self.manifest)
-        unsafe["models"][0]["workflow"]["expected_api_path"] = "../workflow.json"
+        unsafe["models"][0]["workflow"]["path"] = "../workflow.json"
         diagnostics, _ = mim.validate_manifest(unsafe, workspace_root=ROOT)
         self.assertTrue(any(item["code"] == "WORKFLOW_PATH" for item in diagnostics))
 
-    def test_symlinked_profile_fails_when_supported(self) -> None:
+    def test_symlinked_profile_and_workflow_fail_when_supported(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             shutil.copytree(ROOT / "benchmark", root / "benchmark")
             profile = root / "benchmark" / "model-profiles" / "animagine-xl-4-0-opt.v001.json"
-            target = root / "benchmark" / "model-profiles" / "animagine-target.json"
-            target.write_bytes(profile.read_bytes())
+            profile_target = root / "benchmark" / "model-profiles" / "animagine-target.json"
+            profile_target.write_bytes(profile.read_bytes())
             profile.unlink()
             try:
-                profile.symlink_to(target)
+                profile.symlink_to(profile_target)
             except (OSError, NotImplementedError):
                 self.skipTest("symlinks are unavailable")
             diagnostics, _ = mim.validate_manifest(self.manifest, workspace_root=root)
             self.assertTrue(any(item["code"] == "DOCUMENT_READ" for item in diagnostics))
 
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shutil.copytree(ROOT / "benchmark", root / "benchmark")
+            workflow = root / "benchmark" / "workflows" / "animagine-xl.api.json"
+            workflow_target = root / "benchmark" / "workflows" / "animagine-target.api.json"
+            workflow_target.write_bytes(workflow.read_bytes())
+            workflow.unlink()
+            try:
+                workflow.symlink_to(workflow_target)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks are unavailable")
+            diagnostics, _ = mim.validate_manifest(self.manifest, workspace_root=root)
+            self.assertTrue(any(item["code"] == "WORKFLOW_READ" for item in diagnostics))
+
     def test_cli_is_deterministic_and_read_only(self) -> None:
-        observed = [MANIFEST_PATH, *sorted(PROFILE_ROOT.glob("*.json"))]
+        observed = [
+            MANIFEST_PATH,
+            *sorted(PROFILE_ROOT.glob("*.json")),
+            *sorted(WORKFLOW_ROOT.glob("*.json")),
+        ]
         before = {path: (path.stat().st_size, path.stat().st_mtime_ns) for path in observed}
         args = ["check", str(MANIFEST_PATH), "--workspace-root", str(ROOT)]
         first = StringIO()
@@ -121,7 +173,10 @@ class ModelInstallManifestTest(unittest.TestCase):
             self.assertEqual(0, mim.main(args))
         parsed = json.loads(first.getvalue())
         self.assertTrue(parsed["ok"])
-        self.assertEqual("276843fb47ec5aeaa62577aa6b9f1d44a482048da68806934f41e92e850574c3", parsed["manifest_sha256"])
+        self.assertEqual(
+            "a8c2f9292e83f52fd30c839a905918c2e357abb6156b8b27fd7fa8f6feac10b0",
+            parsed["manifest_sha256"],
+        )
 
         second = StringIO()
         with redirect_stdout(second):
@@ -135,8 +190,22 @@ class ModelInstallManifestTest(unittest.TestCase):
         self.assertFalse(schema["additionalProperties"])
         self.assertEqual(mim.MANIFEST_KIND, schema["properties"]["kind"]["const"])
         self.assertEqual(3, schema["properties"]["models"]["minItems"])
-        self.assertEqual(set(mim.BENCHMARK_SCOPES), set(schema["$defs"]["model"]["properties"]["benchmark_scope"]["enum"]))
-        self.assertEqual(set(mim.COMPONENT_DESTINATIONS), set(schema["$defs"]["artifact"]["properties"]["component"]["enum"]))
+        self.assertEqual(
+            set(mim.BENCHMARK_SCOPES),
+            set(schema["$defs"]["model"]["properties"]["benchmark_scope"]["enum"]),
+        )
+        self.assertEqual(
+            set(mim.COMPONENT_DESTINATIONS),
+            set(schema["$defs"]["artifact"]["properties"]["component"]["enum"]),
+        )
+        self.assertEqual(
+            {"status", "path", "sha256"},
+            set(schema["$defs"]["workflow"]["required"]),
+        )
+        self.assertEqual(
+            "repository-template",
+            schema["$defs"]["workflow"]["properties"]["status"]["const"],
+        )
 
     def test_source_has_no_download_execution_or_mutation_surface(self) -> None:
         source = (ROOT / "src" / "ai_illustration" / "model_install_manifest.py").read_text(encoding="utf-8")
