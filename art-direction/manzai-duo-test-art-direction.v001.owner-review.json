@@ -1,0 +1,15 @@
+{
+  "kind": "art-direction-review",
+  "schema_version": "1.0",
+  "id": "art-review-cd2c8e7517a69f45",
+  "profile_ref": "manzai-duo-test-art-direction",
+  "profile_version": "v001",
+  "profile_sha256": "ba85bc9f2539731c1b40d37c29413f9b7dba0be2e9b2ea09b8bf40abe9745cf6",
+  "decision": "approve",
+  "reviewer": "owner",
+  "timestamp": "2026-08-06T10:37:00Z",
+  "observations": [
+    "Owner explicitly approved this test art direction for the boke and tsukkomi references."
+  ],
+  "notes": "Approval recorded from the ChatGPT project conversation after the owner confirmed: このテスト用アートディレクションで承認します"
+}
