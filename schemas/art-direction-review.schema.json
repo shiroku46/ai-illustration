@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/art-direction-review.schema.json",
+  "title": "Art direction owner review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "id",
+    "profile_ref",
+    "profile_version",
+    "profile_sha256",
+    "decision",
+    "reviewer",
+    "timestamp",
+    "observations"
+  ],
+  "properties": {
+    "kind": {"const": "art-direction-review"},
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^art-review-[0-9a-f]{16}$"},
+    "profile_ref": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "profile_version": {"type": "string", "pattern": "^v[0-9]{3}$"},
+    "profile_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "decision": {"enum": ["approve", "reject", "needs_revision"]},
+    "reviewer": {"type": "string", "minLength": 1},
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "observations": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "notes": {"type": "string", "minLength": 1}
+  }
+}
