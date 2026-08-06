@@ -4,7 +4,7 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$ComfyUIRoot,
 
-    [string]$ManifestPath = (Join-Path $PSScriptRoot "..\benchmark\model-install-manifest.v001.json"),
+    [string]$ManifestPath = "",
 
     [switch]$Execute,
     [switch]$AcknowledgeExactArtifacts,
@@ -14,6 +14,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ExpectedManifestSha256 = "1e7bc331054ee090a1570c8d44ac783d9a515acc5f9483bb4f2ad0c9c59dc183"
+if ([string]::IsNullOrWhiteSpace($ManifestPath)) {
+    $ManifestPath = Join-Path $PSScriptRoot "..\benchmark\model-install-manifest.v001.json"
+}
 
 function Assert-SafeChildPath {
     param(
