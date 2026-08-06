@@ -1,0 +1,134 @@
+{
+  "kind": "model-install-manifest",
+  "schema_version": "1.0",
+  "id": "manzai-three-model-benchmark-install",
+  "version": "v001",
+  "target": {
+    "adapter_type": "comfyui",
+    "runtime_type": "pytorch",
+    "operating_system": "windows",
+    "minimum_ram_gb": 16,
+    "minimum_vram_gb": 8
+  },
+  "models": [
+    {
+      "family": "animagine-xl",
+      "profile_path": "benchmark/model-profiles/animagine-xl-4-0-opt.v001.json",
+      "profile_ref": "animagine-xl-4-0-opt@v001",
+      "profile_sha256": "c32fba061e9f3a88453b2a47c326d4a11ab4401a86b8e64cebb966a461895fbc",
+      "benchmark_scope": "production-candidate",
+      "artifacts": [
+        {
+          "id": "animagine-xl-4-0-opt-checkpoint",
+          "component": "checkpoint",
+          "source_url": "https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/main/animagine-xl-4.0-opt.safetensors",
+          "filename": "animagine-xl-4.0-opt.safetensors",
+          "destination": "models/checkpoints",
+          "size_bytes": 6940833562,
+          "sha256": "6327eca98bfb6538dd7a4edce22484a1bbc57a8cff6b11d075d40da1afb847ac",
+          "required": true
+        }
+      ],
+      "benchmark_settings": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 28,
+        "cfg": 5.0,
+        "sampler": "euler_ancestral",
+        "scheduler": "normal",
+        "prompt_format": "tags",
+        "settings_basis": "official-model-card"
+      },
+      "workflow": {
+        "status": "human-export-required",
+        "expected_api_path": "local/benchmark-workflows/animagine-xl.api.json"
+      }
+    },
+    {
+      "family": "illustrious-xl",
+      "profile_path": "benchmark/model-profiles/illustrious-xl-v2-0-stable.v001.json",
+      "profile_ref": "illustrious-xl-v2-0-stable@v001",
+      "profile_sha256": "8845c72c5e8fcb969836a7fdb4ed13e8f661cba92549e6047c4a6e59c83fd91e",
+      "benchmark_scope": "production-candidate",
+      "artifacts": [
+        {
+          "id": "illustrious-xl-v2-0-stable-checkpoint",
+          "component": "checkpoint",
+          "source_url": "https://huggingface.co/OnomaAIResearch/Illustrious-XL-v2.0/resolve/main/Illustrious-XL-v2.0.safetensors",
+          "filename": "Illustrious-XL-v2.0.safetensors",
+          "destination": "models/checkpoints",
+          "size_bytes": 6938043394,
+          "sha256": "c2a1a3eaa13d4c107dc7e00c3fe830cab427aa026362740ea094745b3422a331",
+          "required": true
+        }
+      ],
+      "benchmark_settings": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 28,
+        "cfg": 5.0,
+        "sampler": "euler_ancestral",
+        "scheduler": "normal",
+        "prompt_format": "hybrid",
+        "settings_basis": "project-benchmark-baseline"
+      },
+      "workflow": {
+        "status": "human-export-required",
+        "expected_api_path": "local/benchmark-workflows/illustrious-xl.api.json"
+      }
+    },
+    {
+      "family": "anima-aesthetic",
+      "profile_path": "benchmark/model-profiles/anima-aesthetic-v1-1.v001.json",
+      "profile_ref": "anima-aesthetic-v1-1@v001",
+      "profile_sha256": "794642188f827fe4408ee471ae7728e2903984b2a1c8b6b6a805d8a36de5c359",
+      "benchmark_scope": "evaluation-only",
+      "artifacts": [
+        {
+          "id": "anima-aesthetic-v1-1-diffusion-model",
+          "component": "diffusion-model",
+          "source_url": "https://huggingface.co/circlestone-labs/Anima/resolve/main/split_files/diffusion_models/anima-aesthetic-v1.1.safetensors",
+          "filename": "anima-aesthetic-v1.1.safetensors",
+          "destination": "models/diffusion_models",
+          "size_bytes": 4181385600,
+          "sha256": "3c1868387a3a1ff504bbb87c33678321965ead381fcf87afbd0264daa600c082",
+          "required": true
+        },
+        {
+          "id": "anima-qwen-3-06b-text-encoder",
+          "component": "text-encoder",
+          "source_url": "https://huggingface.co/circlestone-labs/Anima/resolve/main/split_files/text_encoders/qwen_3_06b_base.safetensors",
+          "filename": "qwen_3_06b_base.safetensors",
+          "destination": "models/text_encoders",
+          "size_bytes": 1192135096,
+          "sha256": "cd2a512003e2f9f3cd3c32a9c3573f820bb28c940f73c57b1ddaa983d9223eba",
+          "required": true
+        },
+        {
+          "id": "anima-qwen-image-vae",
+          "component": "vae",
+          "source_url": "https://huggingface.co/circlestone-labs/Anima/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "filename": "qwen_image_vae.safetensors",
+          "destination": "models/vae",
+          "size_bytes": 253806246,
+          "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f",
+          "required": true
+        }
+      ],
+      "benchmark_settings": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 40,
+        "cfg": 4.5,
+        "sampler": "er_sde",
+        "scheduler": "normal",
+        "prompt_format": "natural-language",
+        "settings_basis": "official-model-card"
+      },
+      "workflow": {
+        "status": "human-export-required",
+        "expected_api_path": "local/benchmark-workflows/anima-aesthetic.api.json"
+      }
+    }
+  ]
+}
