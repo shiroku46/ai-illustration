@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/model-install-manifest.schema.json",
+  "title": "Checksum-bound local model installation manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "schema_version", "id", "version", "target", "models"],
+  "properties": {
+    "kind": {"const": "model-install-manifest"},
+    "schema_version": {"const": "1.0"},
+    "id": {"$ref": "#/$defs/token"},
+    "version": {"$ref": "#/$defs/version"},
+    "target": {"$ref": "#/$defs/target"},
+    "models": {
+      "type": "array",
+      "minItems": 3,
+      "items": {"$ref": "#/$defs/model"}
+    }
+  },
+  "$defs": {
+    "token": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^v[0-9]{3}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "safePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "adapter_type",
+        "runtime_type",
+        "operating_system",
+        "minimum_ram_gb",
+        "minimum_vram_gb"
+      ],
+      "properties": {
+        "adapter_type": {"$ref": "#/$defs/token"},
+        "runtime_type": {"$ref": "#/$defs/token"},
+        "operating_system": {"enum": ["windows", "linux", "macos"]},
+        "minimum_ram_gb": {"type": "number", "minimum": 0},
+        "minimum_vram_gb": {"type": "number", "minimum": 0}
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "family",
+        "profile_path",
+        "profile_ref",
+        "profile_sha256",
+        "benchmark_scope",
+        "artifacts",
+        "benchmark_settings",
+        "workflow"
+      ],
+      "properties": {
+        "family": {"$ref": "#/$defs/token"},
+        "profile_path": {"$ref": "#/$defs/safePath"},
+        "profile_ref": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*@v[0-9]{3}$"
+        },
+        "profile_sha256": {"$ref": "#/$defs/sha256"},
+        "benchmark_scope": {
+          "enum": ["production-candidate", "evaluation-only"]
+        },
+        "artifacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/artifact"}
+        },
+        "benchmark_settings": {"$ref": "#/$defs/settings"},
+        "workflow": {"$ref": "#/$defs/workflow"}
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "component",
+        "source_url",
+        "filename",
+        "destination",
+        "size_bytes",
+        "sha256",
+        "required"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/token"},
+        "component": {
+          "enum": ["checkpoint", "diffusion-model", "text-encoder", "vae"]
+        },
+        "source_url": {"type": "string", "pattern": "^https://"},
+        "filename": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^/\\\\]+$"
+        },
+        "destination": {
+          "type": "string",
+          "pattern": "^models/(?:checkpoints|diffusion_models|text_encoders|vae)$"
+        },
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "required": {"type": "boolean"}
+      }
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height",
+        "steps",
+        "cfg",
+        "sampler",
+        "scheduler",
+        "prompt_format",
+        "settings_basis"
+      ],
+      "properties": {
+        "width": {"type": "integer", "minimum": 256, "maximum": 2048, "multipleOf": 64},
+        "height": {"type": "integer", "minimum": 256, "maximum": 2048, "multipleOf": 64},
+        "steps": {"type": "integer", "minimum": 1, "maximum": 100},
+        "cfg": {"type": "number", "minimum": 0, "maximum": 30},
+        "sampler": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:[_-][a-z0-9]+)*$"
+        },
+        "scheduler": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:[_-][a-z0-9]+)*$"
+        },
+        "prompt_format": {
+          "enum": ["tags", "natural-language", "hybrid"]
+        },
+        "settings_basis": {
+          "enum": ["official-model-card", "project-benchmark-baseline"]
+        }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "expected_api_path"],
+      "properties": {
+        "status": {"const": "human-export-required"},
+        "expected_api_path": {"$ref": "#/$defs/safePath"}
+      }
+    }
+  }
+}
