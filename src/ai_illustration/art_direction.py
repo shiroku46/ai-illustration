@@ -22,6 +22,7 @@ SUPPORTED_MEDIA_TYPES = frozenset({"image/png", "image/jpeg", "image/webp"})
 MAX_DOCUMENT_BYTES = 4 * 1024 * 1024
 MAX_REFERENCE_BYTES = 32 * 1024 * 1024
 UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+SNAKE_TOKEN_RE = re.compile(r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
 
 REQUIRED_GLOBAL_ANTI_GOALS = frozenset(
     {
@@ -127,6 +128,11 @@ def profile_sha256(profile: dict[str, Any]) -> str:
 def review_semantic_identity(review: dict[str, Any]) -> dict[str, Any]:
     """Return review identity fields without the self-referential id or free-form notes."""
 
+    observations = review.get("observations")
+    if isinstance(observations, list) and all(_nonempty_text(item) for item in observations):
+        normalized_observations: Any = sorted(set(observations))
+    else:
+        normalized_observations = observations
     return {
         "kind": review.get("kind"),
         "schema_version": review.get("schema_version"),
@@ -136,9 +142,7 @@ def review_semantic_identity(review: dict[str, Any]) -> dict[str, Any]:
         "decision": review.get("decision"),
         "reviewer": review.get("reviewer"),
         "timestamp": review.get("timestamp"),
-        "observations": sorted(set(review.get("observations", [])))
-        if isinstance(review.get("observations"), list)
-        else review.get("observations"),
+        "observations": normalized_observations,
     }
 
 
@@ -185,7 +189,7 @@ def _validate_text_list(
     elif len(value) != len(set(value)):
         diagnostics.append(_diagnostic("DUPLICATE_VALUE", "items must be unique", field))
     if token_values and all(isinstance(item, str) for item in value):
-        invalid = sorted(item for item in value if not TOKEN_RE.fullmatch(item))
+        invalid = sorted(item for item in value if not SNAKE_TOKEN_RE.fullmatch(item))
         if invalid:
             diagnostics.append(
                 _diagnostic("INVALID_TOKEN", f"invalid tokens: {', '.join(invalid)}", field)
@@ -201,7 +205,9 @@ def _validate_role(value: Any, index: int) -> list[dict[str, str]]:
     if not isinstance(value, dict):
         return diagnostics
     if value.get("role") not in ROLE_NAMES:
-        diagnostics.append(_diagnostic("ROLE", "role must be boke or tsukkomi", f"{field}.role"))
+        diagnostics.append(
+            _diagnostic("ROLE", "role must be boke or tsukkomi", f"{field}.role")
+        )
     for name in ROLE_FIELDS - {
         "role",
         "palette",
@@ -235,13 +241,23 @@ def _validate_reference(value: Any, index: int) -> list[dict[str, str]]:
     if not isinstance(value, dict):
         return diagnostics
     if not isinstance(value.get("id"), str) or not TOKEN_RE.fullmatch(value.get("id", "")):
-        diagnostics.append(_diagnostic("INVALID_ID", "id must be a lowercase token", f"{field}.id"))
+        diagnostics.append(
+            _diagnostic("INVALID_ID", "id must be a lowercase token", f"{field}.id")
+        )
     if value.get("role") not in ROLE_NAMES:
-        diagnostics.append(_diagnostic("ROLE", "role must be boke or tsukkomi", f"{field}.role"))
-    try:
-        safe_relative_path(value.get("path"))
-    except (TypeError, ValueError) as exc:
-        diagnostics.append(_diagnostic("UNSAFE_PATH", str(exc), f"{field}.path"))
+        diagnostics.append(
+            _diagnostic("ROLE", "role must be boke or tsukkomi", f"{field}.role")
+        )
+    path = value.get("path")
+    if not isinstance(path, str):
+        diagnostics.append(
+            _diagnostic("UNSAFE_PATH", "path must be a non-empty POSIX relative path", f"{field}.path")
+        )
+    else:
+        try:
+            safe_relative_path(path)
+        except ValueError as exc:
+            diagnostics.append(_diagnostic("UNSAFE_PATH", str(exc), f"{field}.path"))
     if value.get("media_type") not in SUPPORTED_MEDIA_TYPES:
         diagnostics.append(
             _diagnostic(
@@ -252,10 +268,16 @@ def _validate_reference(value: Any, index: int) -> list[dict[str, str]]:
         )
     if not isinstance(value.get("sha256"), str) or not SHA256_RE.fullmatch(value.get("sha256", "")):
         diagnostics.append(
-            _diagnostic("CHECKSUM", "sha256 must be 64 lowercase hexadecimal characters", f"{field}.sha256")
+            _diagnostic(
+                "CHECKSUM",
+                "sha256 must be 64 lowercase hexadecimal characters",
+                f"{field}.sha256",
+            )
         )
     if not _nonempty_text(value.get("purpose")):
-        diagnostics.append(_diagnostic("TEXT_REQUIRED", "purpose is required", f"{field}.purpose"))
+        diagnostics.append(
+            _diagnostic("TEXT_REQUIRED", "purpose is required", f"{field}.purpose")
+        )
     return diagnostics
 
 
@@ -271,7 +293,9 @@ def validate_profile(profile: Any) -> list[dict[str, str]]:
     if profile.get("kind") != PROFILE_KIND:
         diagnostics.append(_diagnostic("KIND", f"kind must be {PROFILE_KIND}", "kind"))
     if profile.get("schema_version") != SCHEMA_VERSION:
-        diagnostics.append(_diagnostic("SCHEMA_VERSION", "schema_version must be 1.0", "schema_version"))
+        diagnostics.append(
+            _diagnostic("SCHEMA_VERSION", "schema_version must be 1.0", "schema_version")
+        )
     if not isinstance(profile.get("id"), str) or not TOKEN_RE.fullmatch(profile.get("id", "")):
         diagnostics.append(_diagnostic("INVALID_ID", "id must be a lowercase token", "id"))
     if not isinstance(profile.get("version"), str) or not VERSION_RE.fullmatch(profile.get("version", "")):
@@ -279,7 +303,9 @@ def validate_profile(profile: Any) -> list[dict[str, str]]:
     if profile.get("status") not in PROFILE_STATES:
         diagnostics.append(_diagnostic("STATUS", "status must be draft or reviewing", "status"))
     if "notes" in profile and not _nonempty_text(profile.get("notes")):
-        diagnostics.append(_diagnostic("TEXT_REQUIRED", "notes must be non-empty when present", "notes"))
+        diagnostics.append(
+            _diagnostic("TEXT_REQUIRED", "notes must be non-empty when present", "notes")
+        )
 
     roles = profile.get("roles")
     if not isinstance(roles, list):
@@ -287,10 +313,22 @@ def validate_profile(profile: Any) -> list[dict[str, str]]:
     else:
         for index, role in enumerate(roles):
             diagnostics.extend(_validate_role(role, index))
-        role_names = [item.get("role") for item in roles if isinstance(item, dict)]
-        if len(roles) != 2 or set(role_names) != ROLE_NAMES or len(role_names) != len(set(role_names)):
+        role_names = [
+            item.get("role")
+            for item in roles
+            if isinstance(item, dict) and isinstance(item.get("role"), str)
+        ]
+        if (
+            len(roles) != 2
+            or set(role_names) != ROLE_NAMES
+            or len(role_names) != len(set(role_names))
+        ):
             diagnostics.append(
-                _diagnostic("ROLE_COVERAGE", "roles must contain exactly one boke and one tsukkomi", "roles")
+                _diagnostic(
+                    "ROLE_COVERAGE",
+                    "roles must contain exactly one boke and one tsukkomi",
+                    "roles",
+                )
             )
 
     anti_goals = profile.get("global_anti_goals")
@@ -311,13 +349,19 @@ def validate_profile(profile: Any) -> list[dict[str, str]]:
     references = profile.get("visual_references")
     if not isinstance(references, list) or not references:
         diagnostics.append(
-            _diagnostic("REFERENCES", "visual_references must be a non-empty list", "visual_references")
+            _diagnostic(
+                "REFERENCES",
+                "visual_references must be a non-empty list",
+                "visual_references",
+            )
         )
     else:
         for index, reference in enumerate(references):
             diagnostics.extend(_validate_reference(reference, index))
         reference_roles = {
-            item.get("role") for item in references if isinstance(item, dict)
+            item.get("role")
+            for item in references
+            if isinstance(item, dict) and isinstance(item.get("role"), str)
         }
         missing_roles = sorted(ROLE_NAMES - reference_roles)
         if missing_roles:
@@ -328,12 +372,28 @@ def validate_profile(profile: Any) -> list[dict[str, str]]:
                     "visual_references",
                 )
             )
-        ids = [item.get("id") for item in references if isinstance(item, dict)]
-        paths = [item.get("path") for item in references if isinstance(item, dict)]
+        ids = [
+            item.get("id")
+            for item in references
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        ]
+        paths = [
+            item.get("path")
+            for item in references
+            if isinstance(item, dict) and isinstance(item.get("path"), str)
+        ]
         if len(ids) != len(set(ids)):
-            diagnostics.append(_diagnostic("DUPLICATE_REFERENCE", "reference ids must be unique", "visual_references"))
+            diagnostics.append(
+                _diagnostic(
+                    "DUPLICATE_REFERENCE", "reference ids must be unique", "visual_references"
+                )
+            )
         if len(paths) != len(set(paths)):
-            diagnostics.append(_diagnostic("DUPLICATE_REFERENCE", "reference paths must be unique", "visual_references"))
+            diagnostics.append(
+                _diagnostic(
+                    "DUPLICATE_REFERENCE", "reference paths must be unique", "visual_references"
+                )
+            )
 
     return _sorted_diagnostics(diagnostics)
 
@@ -350,7 +410,9 @@ def validate_review(review: Any) -> list[dict[str, str]]:
     if review.get("kind") != REVIEW_KIND:
         diagnostics.append(_diagnostic("KIND", f"kind must be {REVIEW_KIND}", "kind"))
     if review.get("schema_version") != SCHEMA_VERSION:
-        diagnostics.append(_diagnostic("SCHEMA_VERSION", "schema_version must be 1.0", "schema_version"))
+        diagnostics.append(
+            _diagnostic("SCHEMA_VERSION", "schema_version must be 1.0", "schema_version")
+        )
     if not isinstance(review.get("id"), str) or not TOKEN_RE.fullmatch(review.get("id", "")):
         diagnostics.append(_diagnostic("INVALID_ID", "id must be a lowercase token", "id"))
     elif review.get("id") != expected_review_id(review):
@@ -358,24 +420,44 @@ def validate_review(review: Any) -> list[dict[str, str]]:
             _diagnostic("REVIEW_ID", f"id must equal {expected_review_id(review)}", "id")
         )
     if not isinstance(review.get("profile_ref"), str) or not TOKEN_RE.fullmatch(review.get("profile_ref", "")):
-        diagnostics.append(_diagnostic("INVALID_REFERENCE", "profile_ref must be a lowercase token", "profile_ref"))
+        diagnostics.append(
+            _diagnostic(
+                "INVALID_REFERENCE", "profile_ref must be a lowercase token", "profile_ref"
+            )
+        )
     if not isinstance(review.get("profile_version"), str) or not VERSION_RE.fullmatch(review.get("profile_version", "")):
-        diagnostics.append(_diagnostic("VERSION", "profile_version must use vNNN", "profile_version"))
+        diagnostics.append(
+            _diagnostic("VERSION", "profile_version must use vNNN", "profile_version")
+        )
     if not isinstance(review.get("profile_sha256"), str) or not SHA256_RE.fullmatch(review.get("profile_sha256", "")):
-        diagnostics.append(_diagnostic("CHECKSUM", "profile_sha256 must be 64 lowercase hexadecimal characters", "profile_sha256"))
+        diagnostics.append(
+            _diagnostic(
+                "CHECKSUM",
+                "profile_sha256 must be 64 lowercase hexadecimal characters",
+                "profile_sha256",
+            )
+        )
     if review.get("decision") not in REVIEW_DECISIONS:
         diagnostics.append(_diagnostic("DECISION", "invalid review decision", "decision"))
     if not _nonempty_text(review.get("reviewer")):
         diagnostics.append(_diagnostic("REVIEWER", "reviewer is required", "reviewer"))
     if not isinstance(review.get("timestamp"), str) or not UTC_RE.fullmatch(review.get("timestamp", "")):
         diagnostics.append(
-            _diagnostic("TIMESTAMP", "timestamp must be UTC YYYY-MM-DDTHH:MM:SSZ", "timestamp")
+            _diagnostic(
+                "TIMESTAMP",
+                "timestamp must be UTC YYYY-MM-DDTHH:MM:SSZ",
+                "timestamp",
+            )
         )
     diagnostics.extend(
-        _validate_text_list(review.get("observations"), field="observations", allow_empty=True)
+        _validate_text_list(
+            review.get("observations"), field="observations", allow_empty=True
+        )
     )
     if "notes" in review and not _nonempty_text(review.get("notes")):
-        diagnostics.append(_diagnostic("TEXT_REQUIRED", "notes must be non-empty when present", "notes"))
+        diagnostics.append(
+            _diagnostic("TEXT_REQUIRED", "notes must be non-empty when present", "notes")
+        )
     return _sorted_diagnostics(diagnostics)
 
 
@@ -395,7 +477,11 @@ def _media_matches(payload: bytes, media_type: str) -> bool:
     if media_type == "image/png":
         return payload.startswith(b"\x89PNG\r\n\x1a\n")
     if media_type == "image/jpeg":
-        return len(payload) >= 4 and payload.startswith(b"\xff\xd8") and payload.endswith(b"\xff\xd9")
+        return (
+            len(payload) >= 4
+            and payload.startswith(b"\xff\xd8")
+            and payload.endswith(b"\xff\xd9")
+        )
     if media_type == "image/webp":
         return len(payload) >= 12 and payload[:4] == b"RIFF" and payload[8:12] == b"WEBP"
     return False
@@ -408,19 +494,42 @@ def validate_live_references(
     if diagnostics:
         return diagnostics
     assert isinstance(profile, dict)
+
+    expanded = reference_root.expanduser()
+    lexical_root = expanded if expanded.is_absolute() else Path.cwd() / expanded
+    if lexical_root.is_symlink():
+        return [
+            _diagnostic(
+                "REFERENCE_ROOT",
+                "reference_root must not be a symlink",
+                "reference_root",
+            )
+        ]
     try:
-        root = reference_root.expanduser().resolve(strict=True)
+        root = lexical_root.resolve(strict=True)
     except OSError as exc:
         return [_diagnostic("REFERENCE_ROOT", str(exc), "reference_root")]
-    if not root.is_dir() or root.is_symlink():
-        return [_diagnostic("REFERENCE_ROOT", "reference_root must be a non-symlink directory", "reference_root")]
+    if not root.is_dir():
+        return [
+            _diagnostic(
+                "REFERENCE_ROOT",
+                "reference_root must be a directory",
+                "reference_root",
+            )
+        ]
 
     for index, reference in enumerate(profile["visual_references"]):
         field = f"visual_references[{index}].path"
         relative = safe_relative_path(reference["path"])
         lexical = root.joinpath(*relative.parts)
         if _has_symlink_component(lexical, root):
-            diagnostics.append(_diagnostic("REFERENCE_SYMLINK", "reference path contains a symlink", field))
+            diagnostics.append(
+                _diagnostic(
+                    "REFERENCE_SYMLINK",
+                    "reference path contains a symlink",
+                    field,
+                )
+            )
             continue
         try:
             resolved = lexical.resolve(strict=True)
@@ -429,7 +538,9 @@ def validate_live_references(
             diagnostics.append(_diagnostic("REFERENCE_MISSING", str(exc), field))
             continue
         if not resolved.is_file() or resolved.is_symlink():
-            diagnostics.append(_diagnostic("REFERENCE_TYPE", "reference must be a regular file", field))
+            diagnostics.append(
+                _diagnostic("REFERENCE_TYPE", "reference must be a regular file", field)
+            )
             continue
         try:
             size = resolved.stat().st_size
@@ -451,9 +562,19 @@ def validate_live_references(
             diagnostics.append(_diagnostic("REFERENCE_READ", str(exc), field))
             continue
         if not _media_matches(payload, reference["media_type"]):
-            diagnostics.append(_diagnostic("REFERENCE_MEDIA", "reference bytes do not match media_type", field))
+            diagnostics.append(
+                _diagnostic(
+                    "REFERENCE_MEDIA",
+                    "reference bytes do not match media_type",
+                    field,
+                )
+            )
         if hashlib.sha256(payload).hexdigest() != reference["sha256"]:
-            diagnostics.append(_diagnostic("REFERENCE_CHECKSUM", "reference SHA-256 does not match", field))
+            diagnostics.append(
+                _diagnostic(
+                    "REFERENCE_CHECKSUM", "reference SHA-256 does not match", field
+                )
+            )
     return _sorted_diagnostics(diagnostics)
 
 
@@ -465,18 +586,44 @@ def validate_approval(
     if not isinstance(profile, dict) or not isinstance(review, dict):
         return _sorted_diagnostics(diagnostics)
     if review.get("profile_ref") != profile.get("id"):
-        diagnostics.append(_diagnostic("PROFILE_BINDING", "review profile_ref is stale or mismatched", "profile_ref"))
+        diagnostics.append(
+            _diagnostic(
+                "PROFILE_BINDING",
+                "review profile_ref is stale or mismatched",
+                "profile_ref",
+            )
+        )
     if review.get("profile_version") != profile.get("version"):
-        diagnostics.append(_diagnostic("PROFILE_BINDING", "review profile_version is stale or mismatched", "profile_version"))
+        diagnostics.append(
+            _diagnostic(
+                "PROFILE_BINDING",
+                "review profile_version is stale or mismatched",
+                "profile_version",
+            )
+        )
     expected_sha = profile_sha256(profile)
     if review.get("profile_sha256") != expected_sha:
-        diagnostics.append(_diagnostic("PROFILE_BINDING", "review profile_sha256 is stale or mismatched", "profile_sha256"))
+        diagnostics.append(
+            _diagnostic(
+                "PROFILE_BINDING",
+                "review profile_sha256 is stale or mismatched",
+                "profile_sha256",
+            )
+        )
     if review.get("decision") != "approve":
-        diagnostics.append(_diagnostic("NOT_APPROVED", "review decision does not authorize benchmarking", "decision"))
+        diagnostics.append(
+            _diagnostic(
+                "NOT_APPROVED",
+                "review decision does not authorize benchmarking",
+                "decision",
+            )
+        )
     return _sorted_diagnostics(diagnostics)
 
 
-def _sorted_diagnostics(diagnostics: list[dict[str, str]]) -> list[dict[str, str]]:
+def _sorted_diagnostics(
+    diagnostics: list[dict[str, str]],
+) -> list[dict[str, str]]:
     unique = {
         (item.get("field", ""), item.get("code", ""), item.get("message", "")): {
             "code": item.get("code", ""),
@@ -495,14 +642,22 @@ def _safe_document_path(path: Path) -> Path:
     lexical = expanded if expanded.is_absolute() else Path.cwd() / expanded
     for candidate in (lexical, *lexical.parents):
         if candidate.exists() and candidate.is_symlink():
-            raise ArtDirectionError("DOCUMENT_SYMLINK", "document path contains a symlink", "document")
+            raise ArtDirectionError(
+                "DOCUMENT_SYMLINK", "document path contains a symlink", "document"
+            )
     try:
         resolved = expanded.resolve(strict=True)
     except OSError as exc:
         raise ArtDirectionError("DOCUMENT_MISSING", str(exc), "document") from exc
     if not resolved.is_file() or resolved.is_symlink():
-        raise ArtDirectionError("DOCUMENT_TYPE", "document must be a regular file", "document")
-    if resolved.stat().st_size > MAX_DOCUMENT_BYTES:
+        raise ArtDirectionError(
+            "DOCUMENT_TYPE", "document must be a regular file", "document"
+        )
+    try:
+        size = resolved.stat().st_size
+    except OSError as exc:
+        raise ArtDirectionError("DOCUMENT_READ", str(exc), "document") from exc
+    if size > MAX_DOCUMENT_BYTES:
         raise ArtDirectionError("DOCUMENT_SIZE", "document is too large", "document")
     return resolved
 
@@ -515,7 +670,9 @@ def load_document(path: Path) -> dict[str, Any]:
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ArtDirectionError("DOCUMENT_JSON", str(exc), "document") from exc
     if not isinstance(value, dict):
-        raise ArtDirectionError("DOCUMENT_OBJECT", "document root must be an object", "document")
+        raise ArtDirectionError(
+            "DOCUMENT_OBJECT", "document root must be an object", "document"
+        )
     return value
 
 
@@ -540,7 +697,9 @@ def _result(
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Validate local art-direction contracts without mutation")
+    parser = argparse.ArgumentParser(
+        description="Validate local art-direction contracts without mutation"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     profile_check = sub.add_parser("profile-check")
     profile_check.add_argument("profile", type=Path)
@@ -556,16 +715,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         profile = load_document(args.profile)
-        review = load_document(args.review) if args.command == "approval-check" else None
+        review = (
+            load_document(args.review)
+            if args.command == "approval-check"
+            else None
+        )
         diagnostics = (
             validate_approval(profile, review, args.reference_root)
             if review is not None
             else validate_live_references(profile, args.reference_root)
         )
-        output = _result(diagnostics=diagnostics, profile=profile, review=review)
+        output = _result(
+            diagnostics=diagnostics,
+            profile=profile,
+            review=review,
+        )
     except ArtDirectionError as exc:
         output = _result(diagnostics=[exc.to_dict()])
-    print(json.dumps(output, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
+    print(
+        json.dumps(
+            output,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
     return 0 if output["ok"] else 1
 
 
