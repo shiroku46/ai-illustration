@@ -456,7 +456,13 @@ class BenchmarkReviewTest(unittest.TestCase):
 
     def test_failed_unknown_duplicate_other_family_and_overlap_runs_fail(self) -> None:
         failed = copy.deepcopy(self.review)
-        failed["accepted_run_ids"][0] = self.matrix[-1]["run_id"]
+        failed_run_id = next(
+            entry["run_id"]
+            for entry in self.results["results"]
+            if entry["state"] == "failed"
+            and entry["run_id"] not in failed["rejected_run_ids"]
+        )
+        failed["accepted_run_ids"][0] = failed_run_id
         failed["id"] = rv.expected_review_id(failed)
         self.assertTrue(any(item["code"] == "ACCEPTED_RUN_FAILED" for item in self._validate(failed)[0]))
 
