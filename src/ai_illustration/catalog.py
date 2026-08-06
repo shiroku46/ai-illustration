@@ -114,8 +114,9 @@ def validate_tool_profile(path: Path, data: dict[str, Any] | None = None) -> lis
     diagnostics: list[Diagnostic] = []
     unknown = sorted(set(document) - TOOL_ALLOWED)
     missing = sorted(TOOL_REQUIRED - set(document))
-    if document.get("profile_type") == "model-configuration":
-        missing.extend(sorted(MODEL_SCOPE_FIELDS - set(document)))
+    present_scopes = MODEL_SCOPE_FIELDS & set(document)
+    if present_scopes and present_scopes != MODEL_SCOPE_FIELDS:
+        missing.extend(sorted(MODEL_SCOPE_FIELDS - present_scopes))
     for field in sorted(set(missing)):
         diagnostics.append(_diag(path, "MISSING_FIELD", "required field is missing", field))
     if unknown:
@@ -148,7 +149,7 @@ def validate_tool_profile(path: Path, data: dict[str, Any] | None = None) -> lis
     for field in ("license_evidence_state", "commercial_use_review_state", "decision_state"):
         if document.get(field) not in STATES:
             diagnostics.append(_diag(path, "REVIEW_STATE", "invalid review state", field))
-    for field in MODEL_SCOPE_FIELDS & set(document):
+    for field in present_scopes:
         if document.get(field) not in SCOPE_STATES:
             diagnostics.append(_diag(path, "LICENSE_SCOPE_STATE", "invalid license-scope review state", field))
     evidence = document.get("evidence_references")
@@ -175,7 +176,7 @@ def validate_tool_profile(path: Path, data: dict[str, Any] | None = None) -> lis
             diagnostics.append(_diag(path, "APPROVAL_WITHOUT_COMMERCIAL_REVIEW", "approved decision requires approved commercial-use review", "decision_state"))
         if not evidence:
             diagnostics.append(_diag(path, "APPROVAL_WITHOUT_EVIDENCE", "approved decision requires evidence", "decision_state"))
-        if document.get("profile_type") == "model-configuration":
+        if document.get("profile_type") == "model-configuration" and present_scopes == MODEL_SCOPE_FIELDS:
             if document.get("benchmark_use_review_state") != "approved":
                 diagnostics.append(_diag(path, "APPROVAL_WITHOUT_BENCHMARK_USE", "approved model profile requires approved benchmark use", "benchmark_use_review_state"))
             if document.get("commercial_output_use_review_state") not in {"approved", "not-applicable"}:
@@ -246,15 +247,7 @@ def catalog_listing(profiles: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{field: profile.get(field) for field in fields} for profile in sorted(profiles, key=lambda item: (str(item.get("id", "")), str(item.get("version", ""))))]
 
 
-def evaluate_model_license_eligibility(profile: dict[str, Any]) -> ModelLicenseEligibility:
-    states = {
-        "license_evidence_state": str(profile.get("license_evidence_state", "")),
-        "commercial_use_review_state": str(profile.get("commercial_use_review_state", "")),
-        "decision_state": str(profile.get("decision_state", "")),
-        "benchmark_use_review_state": str(profile.get("benchmark_use_review_state", "")),
-        "production_model_use_review_state": str(profile.get("production_model_use_review_state", "")),
-        "commercial_output_use_review_state": str(profile.get("commercial_output_use_review_state", "")),
-    }
+def _base_model_license_reasons(profile: dict[str, Any]) -> list[str]:
     reasons: list[str] = []
     if profile.get("profile_type") != "model-configuration":
         reasons.append("not-model-configuration")
@@ -264,17 +257,58 @@ def evaluate_model_license_eligibility(profile: dict[str, Any]) -> ModelLicenseE
         reasons.append("commercial-review-not-approved")
     if profile.get("decision_state") != "approved":
         reasons.append("profile-decision-not-approved")
+    return reasons
+
+
+def evaluate_model_license_eligibility(profile: dict[str, Any]) -> ModelLicenseEligibility:
+    present_scopes = MODEL_SCOPE_FIELDS & set(profile)
+    states = {
+        "license_evidence_state": str(profile.get("license_evidence_state", "")),
+        "commercial_use_review_state": str(profile.get("commercial_use_review_state", "")),
+        "decision_state": str(profile.get("decision_state", "")),
+        "benchmark_use_review_state": str(profile.get("benchmark_use_review_state", "")),
+        "production_model_use_review_state": str(profile.get("production_model_use_review_state", "")),
+        "commercial_output_use_review_state": str(profile.get("commercial_output_use_review_state", "")),
+        "scope_contract": "explicit" if present_scopes else "legacy",
+    }
+    base_reasons = _base_model_license_reasons(profile)
+    if not present_scopes:
+        eligible = not base_reasons
+        return ModelLicenseEligibility(
+            profile_id=str(profile.get("id", "")),
+            benchmark_eligible=eligible,
+            production_eligible=eligible,
+            commercial_output_eligible=eligible,
+            denial_reasons=tuple(sorted(set(base_reasons))),
+            states=states,
+        )
+    if present_scopes != MODEL_SCOPE_FIELDS:
+        reasons = list(base_reasons)
+        reasons.append("license-scope-contract-incomplete")
+        for field in sorted(MODEL_SCOPE_FIELDS - present_scopes):
+            reasons.append(field.replace("_review_state", "").replace("_", "-") + "-missing")
+        return ModelLicenseEligibility(
+            profile_id=str(profile.get("id", "")),
+            benchmark_eligible=False,
+            production_eligible=False,
+            commercial_output_eligible=False,
+            denial_reasons=tuple(sorted(set(reasons))),
+            states=states,
+        )
+
+    benchmark_reasons = list(base_reasons)
     if profile.get("benchmark_use_review_state") != "approved":
-        reasons.append("benchmark-use-not-approved")
+        benchmark_reasons.append("benchmark-use-not-approved")
     output_state = profile.get("commercial_output_use_review_state")
     if output_state not in {"approved", "not-applicable"}:
-        reasons.append("commercial-output-use-not-approved")
-    benchmark_eligible = not reasons
+        benchmark_reasons.append("commercial-output-use-not-approved")
+    benchmark_eligible = not benchmark_reasons
     production_eligible = benchmark_eligible and profile.get("production_model_use_review_state") == "approved"
     commercial_output_eligible = (
-        profile.get("license_evidence_state") == "approved"
+        not base_reasons
         and output_state == "approved"
     )
+    reasons = list(benchmark_reasons)
     if benchmark_eligible and not production_eligible:
         reasons.append("production-model-use-not-approved")
     return ModelLicenseEligibility(
