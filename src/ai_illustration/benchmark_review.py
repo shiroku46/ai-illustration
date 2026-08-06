@@ -33,6 +33,7 @@ REQUIRED_ACCEPTED_CASES = frozenset(
 )
 MAX_PACKAGE_FILE_BYTES = 256 * 1024 * 1024
 UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+MODEL_REF_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*@v[0-9]{3}$")
 
 REVIEW_FIELDS = frozenset(
     {
@@ -96,7 +97,7 @@ def _diag(code: str, message: str, field: str = "") -> dict[str, str]:
     return {"code": code, "message": message, "field": field}
 
 
-def _sorted_diagnostics(values: Iterable[dict[str, str]]) -> list[dict[str, str]]:
+def _sorted(values: Iterable[dict[str, str]]) -> list[dict[str, str]]:
     unique = {
         (item.get("field", ""), item.get("code", ""), item.get("message", "")): {
             "code": item.get("code", ""),
@@ -112,7 +113,7 @@ def _nonempty(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
-def _check_fields(
+def _fields(
     value: Any,
     *,
     required: frozenset[str],
@@ -126,9 +127,13 @@ def _check_fields(
     unknown = sorted(set(value) - allowed)
     forbidden = sorted(set(value) & FORBIDDEN_DECISION_FIELDS)
     if missing:
-        diagnostics.append(_diag("MISSING_FIELD", f"missing fields: {', '.join(missing)}", field))
+        diagnostics.append(
+            _diag("MISSING_FIELD", f"missing fields: {', '.join(missing)}", field)
+        )
     if unknown:
-        diagnostics.append(_diag("UNKNOWN_FIELD", f"unknown fields: {', '.join(unknown)}", field))
+        diagnostics.append(
+            _diag("UNKNOWN_FIELD", f"unknown fields: {', '.join(unknown)}", field)
+        )
     if forbidden:
         diagnostics.append(
             _diag(
@@ -163,39 +168,49 @@ def _string_list(
     *,
     field: str,
     allow_empty: bool = True,
-    tokens: bool = False,
+    token_items: bool = False,
 ) -> list[dict[str, str]]:
     if not isinstance(value, list) or (not allow_empty and not value):
-        return [_diag("LIST_REQUIRED", "must be a list" if allow_empty else "must be a non-empty list", field)]
+        return [
+            _diag(
+                "LIST_REQUIRED",
+                "must be a list" if allow_empty else "must be a non-empty list",
+                field,
+            )
+        ]
     diagnostics: list[dict[str, str]] = []
     if any(not _nonempty(item) for item in value):
-        diagnostics.append(_diag("TEXT_REQUIRED", "items must be non-empty strings", field))
+        diagnostics.append(
+            _diag("TEXT_REQUIRED", "items must be non-empty strings", field)
+        )
         return diagnostics
     if len(value) != len(set(value)):
         diagnostics.append(_diag("DUPLICATE_VALUE", "items must be unique", field))
-    if tokens:
+    if token_items:
         invalid = sorted(item for item in value if not TOKEN_RE.fullmatch(item))
         if invalid:
-            diagnostics.append(_diag("INVALID_TOKEN", f"invalid tokens: {', '.join(invalid)}", field))
+            diagnostics.append(
+                _diag("INVALID_TOKEN", f"invalid tokens: {', '.join(invalid)}", field)
+            )
     return diagnostics
 
 
+def _normalized_list(review: dict[str, Any], name: str) -> Any:
+    value = review.get(name)
+    if isinstance(value, list) and all(_nonempty(item) for item in value):
+        return sorted(set(value))
+    return value
+
+
 def review_semantic_identity(review: dict[str, Any]) -> dict[str, Any]:
-    """Return deterministic decision identity, excluding self ID and optional notes."""
+    """Return deterministic decision identity, excluding ID and optional notes."""
 
     selected = review.get("selected_model")
-    normalized_selected = (
+    selected_identity = (
         {key: selected.get(key) for key in sorted(SELECTED_MODEL_FIELDS)}
         if isinstance(selected, dict)
         else None
     )
-
-    def normalized_list(name: str) -> Any:
-        value = review.get(name)
-        if isinstance(value, list) and all(_nonempty(item) for item in value):
-            return sorted(set(value))
-        return value
-
     return {
         "kind": review.get("kind"),
         "schema_version": review.get("schema_version"),
@@ -210,21 +225,51 @@ def review_semantic_identity(review: dict[str, Any]) -> dict[str, Any]:
         "reviewer": review.get("reviewer"),
         "timestamp": review.get("timestamp"),
         "decision": review.get("decision"),
-        "selected_model": normalized_selected,
-        "accepted_run_ids": normalized_list("accepted_run_ids"),
-        "rejected_run_ids": normalized_list("rejected_run_ids"),
-        "hard_fail_categories": normalized_list("hard_fail_categories"),
-        "observations": normalized_list("observations"),
+        "selected_model": selected_identity,
+        "accepted_run_ids": _normalized_list(review, "accepted_run_ids"),
+        "rejected_run_ids": _normalized_list(review, "rejected_run_ids"),
+        "hard_fail_categories": _normalized_list(review, "hard_fail_categories"),
+        "observations": _normalized_list(review, "observations"),
     }
 
 
 def expected_review_id(review: dict[str, Any]) -> str:
-    digest = hashlib.sha256(canonical_json(review_semantic_identity(review))).hexdigest()[:16]
-    return f"benchmark-review-{digest}"
+    suffix = hashlib.sha256(
+        canonical_json(review_semantic_identity(review))
+    ).hexdigest()[:16]
+    return f"benchmark-review-{suffix}"
+
+
+def _validate_selected_model(selected: Any) -> list[dict[str, str]]:
+    diagnostics = _fields(
+        selected,
+        required=SELECTED_MODEL_FIELDS,
+        allowed=SELECTED_MODEL_FIELDS,
+        field="selected_model",
+    )
+    if not isinstance(selected, dict):
+        return diagnostics
+    diagnostics.extend(_token(selected.get("family"), "selected_model.family"))
+    profile_ref = selected.get("profile_ref")
+    if not isinstance(profile_ref, str) or not MODEL_REF_RE.fullmatch(profile_ref):
+        diagnostics.append(
+            _diag(
+                "MODEL_REFERENCE",
+                "profile_ref must use id@vNNN",
+                "selected_model.profile_ref",
+            )
+        )
+    diagnostics.extend(
+        _checksum(selected.get("profile_sha256"), "selected_model.profile_sha256")
+    )
+    diagnostics.extend(
+        _checksum(selected.get("workflow_sha256"), "selected_model.workflow_sha256")
+    )
+    return diagnostics
 
 
 def validate_review_document(review: Any) -> list[dict[str, str]]:
-    diagnostics = _check_fields(
+    diagnostics = _fields(
         review,
         required=REVIEW_REQUIRED,
         allowed=REVIEW_FIELDS,
@@ -235,12 +280,16 @@ def validate_review_document(review: Any) -> list[dict[str, str]]:
     if review.get("kind") != REVIEW_KIND:
         diagnostics.append(_diag("KIND", f"kind must be {REVIEW_KIND}", "kind"))
     if review.get("schema_version") != SCHEMA_VERSION:
-        diagnostics.append(_diag("SCHEMA_VERSION", "schema_version must be 1.0", "schema_version"))
+        diagnostics.append(
+            _diag("SCHEMA_VERSION", "schema_version must be 1.0", "schema_version")
+        )
     diagnostics.extend(_token(review.get("id"), "id"))
     if isinstance(review.get("id"), str) and TOKEN_RE.fullmatch(review["id"]):
         expected = expected_review_id(review)
         if review["id"] != expected:
-            diagnostics.append(_diag("REVIEW_ID", f"id must equal {expected}", "id"))
+            diagnostics.append(
+                _diag("REVIEW_ID", f"id must equal {expected}", "id")
+            )
     for name in ("plan_ref", "results_ref", "package_ref"):
         diagnostics.extend(_token(review.get(name), name))
     for name in ("plan_version", "results_version"):
@@ -249,28 +298,51 @@ def validate_review_document(review: Any) -> list[dict[str, str]]:
         diagnostics.extend(_checksum(review.get(name), name))
     if not _nonempty(review.get("reviewer")):
         diagnostics.append(_diag("REVIEWER", "reviewer is required", "reviewer"))
-    if not isinstance(review.get("timestamp"), str) or not UTC_RE.fullmatch(review.get("timestamp", "")):
+    if not isinstance(review.get("timestamp"), str) or not UTC_RE.fullmatch(
+        review.get("timestamp", "")
+    ):
         diagnostics.append(
-            _diag("TIMESTAMP", "timestamp must be UTC YYYY-MM-DDTHH:MM:SSZ", "timestamp")
+            _diag(
+                "TIMESTAMP",
+                "timestamp must be UTC YYYY-MM-DDTHH:MM:SSZ",
+                "timestamp",
+            )
         )
     decision = review.get("decision")
     if decision not in DECISIONS:
         diagnostics.append(_diag("DECISION", "unsupported owner decision", "decision"))
 
     diagnostics.extend(
-        _string_list(review.get("accepted_run_ids"), field="accepted_run_ids", tokens=True)
+        _string_list(
+            review.get("accepted_run_ids"),
+            field="accepted_run_ids",
+            token_items=True,
+        )
     )
     diagnostics.extend(
-        _string_list(review.get("rejected_run_ids"), field="rejected_run_ids", tokens=True)
+        _string_list(
+            review.get("rejected_run_ids"),
+            field="rejected_run_ids",
+            token_items=True,
+        )
     )
     diagnostics.extend(
-        _string_list(review.get("hard_fail_categories"), field="hard_fail_categories", tokens=True)
+        _string_list(
+            review.get("hard_fail_categories"),
+            field="hard_fail_categories",
+        )
     )
     diagnostics.extend(
-        _string_list(review.get("observations"), field="observations", allow_empty=False)
+        _string_list(
+            review.get("observations"),
+            field="observations",
+            allow_empty=False,
+        )
     )
     if "notes" in review and not _nonempty(review.get("notes")):
-        diagnostics.append(_diag("TEXT_REQUIRED", "notes must be non-empty when present", "notes"))
+        diagnostics.append(
+            _diag("TEXT_REQUIRED", "notes must be non-empty when present", "notes")
+        )
 
     hard_fails = review.get("hard_fail_categories")
     if isinstance(hard_fails, list) and all(isinstance(item, str) for item in hard_fails):
@@ -290,34 +362,16 @@ def validate_review_document(review: Any) -> list[dict[str, str]]:
         overlap = sorted(set(accepted) & set(rejected))
         if overlap:
             diagnostics.append(
-                _diag("RUN_OVERLAP", f"accepted and rejected runs overlap: {', '.join(overlap)}", "accepted_run_ids")
+                _diag(
+                    "RUN_OVERLAP",
+                    f"accepted and rejected runs overlap: {', '.join(overlap)}",
+                    "accepted_run_ids",
+                )
             )
 
     selected = review.get("selected_model")
     if decision == "select_model":
-        diagnostics.extend(
-            _check_fields(
-                selected,
-                required=SELECTED_MODEL_FIELDS,
-                allowed=SELECTED_MODEL_FIELDS,
-                field="selected_model",
-            )
-        )
-        if isinstance(selected, dict):
-            diagnostics.extend(_token(selected.get("family"), "selected_model.family"))
-            profile_ref = selected.get("profile_ref")
-            if not isinstance(profile_ref, str) or not re.fullmatch(
-                r"[a-z0-9]+(?:-[a-z0-9]+)*@v[0-9]{3}", profile_ref
-            ):
-                diagnostics.append(
-                    _diag("MODEL_REFERENCE", "profile_ref must use id@vNNN", "selected_model.profile_ref")
-                )
-            diagnostics.extend(
-                _checksum(selected.get("profile_sha256"), "selected_model.profile_sha256")
-            )
-            diagnostics.extend(
-                _checksum(selected.get("workflow_sha256"), "selected_model.workflow_sha256")
-            )
+        diagnostics.extend(_validate_selected_model(selected))
         if not isinstance(accepted, list) or len(accepted) < MIN_ACCEPTED_RUNS:
             diagnostics.append(
                 _diag(
@@ -329,27 +383,46 @@ def validate_review_document(review: Any) -> list[dict[str, str]]:
     elif decision in {"reject_all", "needs_revision"}:
         if selected is not None:
             diagnostics.append(
-                _diag("SELECTED_MODEL_FORBIDDEN", f"{decision} must not contain selected_model", "selected_model")
+                _diag(
+                    "SELECTED_MODEL_FORBIDDEN",
+                    f"{decision} must not contain selected_model",
+                    "selected_model",
+                )
             )
         if isinstance(accepted, list) and accepted:
             diagnostics.append(
-                _diag("ACCEPTED_RUNS_FORBIDDEN", f"{decision} must not accept runs", "accepted_run_ids")
+                _diag(
+                    "ACCEPTED_RUNS_FORBIDDEN",
+                    f"{decision} must not accept runs",
+                    "accepted_run_ids",
+                )
             )
-
-    return _sorted_diagnostics(diagnostics)
+    return _sorted(diagnostics)
 
 
 def _package_root(path: Path) -> tuple[Path | None, list[dict[str, str]]]:
     expanded = path.expanduser()
     lexical = expanded if expanded.is_absolute() else Path.cwd() / expanded
     if lexical.is_symlink():
-        return None, [_diag("PACKAGE_ROOT_SYMLINK", "package root must not be a symlink", "package_root")]
+        return None, [
+            _diag(
+                "PACKAGE_ROOT_SYMLINK",
+                "package root must not be a symlink",
+                "package_root",
+            )
+        ]
     try:
         resolved = lexical.resolve(strict=True)
     except OSError as exc:
         return None, [_diag("PACKAGE_ROOT_MISSING", str(exc), "package_root")]
     if not resolved.is_dir():
-        return None, [_diag("PACKAGE_ROOT_TYPE", "package root must be a directory", "package_root")]
+        return None, [
+            _diag(
+                "PACKAGE_ROOT_TYPE",
+                "package root must be a directory",
+                "package_root",
+            )
+        ]
     return resolved, []
 
 
@@ -378,25 +451,55 @@ def validate_package(
     for path in root.rglob("*"):
         relative = path.relative_to(root).as_posix()
         if path.is_symlink() or _has_symlink(path, root):
-            diagnostics.append(_diag("PACKAGE_SYMLINK", "package path contains a symlink", relative))
+            diagnostics.append(
+                _diag(
+                    "PACKAGE_SYMLINK",
+                    "package path contains a symlink",
+                    relative,
+                )
+            )
             continue
         if path.is_file():
             actual_paths.add(relative)
         elif not path.is_dir():
-            diagnostics.append(_diag("PACKAGE_TYPE", "package entry must be a regular file or directory", relative))
+            diagnostics.append(
+                _diag(
+                    "PACKAGE_TYPE",
+                    "package entry must be a regular file or directory",
+                    relative,
+                )
+            )
     missing = sorted(expected_paths - actual_paths)
     extra = sorted(actual_paths - expected_paths)
     if missing:
-        diagnostics.append(_diag("PACKAGE_MISSING", f"missing files: {', '.join(missing)}", "package_root"))
+        diagnostics.append(
+            _diag(
+                "PACKAGE_MISSING",
+                f"missing files: {', '.join(missing)}",
+                "package_root",
+            )
+        )
     if extra:
-        diagnostics.append(_diag("PACKAGE_EXTRA", f"unexpected files: {', '.join(extra)}", "package_root"))
+        diagnostics.append(
+            _diag(
+                "PACKAGE_EXTRA",
+                f"unexpected files: {', '.join(extra)}",
+                "package_root",
+            )
+        )
 
     for relative in sorted(expected_paths & actual_paths):
         try:
             safe = safe_relative_path(relative)
             path = root.joinpath(*safe.parts)
             if _has_symlink(path, root) or not path.is_file():
-                diagnostics.append(_diag("PACKAGE_TYPE", "expected regular non-symlink file", relative))
+                diagnostics.append(
+                    _diag(
+                        "PACKAGE_TYPE",
+                        "expected regular non-symlink file",
+                        relative,
+                    )
+                )
                 continue
             size = path.stat().st_size
             if size <= 0 or size > MAX_PACKAGE_FILE_BYTES:
@@ -414,30 +517,51 @@ def validate_package(
             continue
         expected = expected_files[relative]
         if payload != expected:
-            diagnostics.append(_diag("PACKAGE_BYTES", "file bytes do not match deterministic package", relative))
+            diagnostics.append(
+                _diag(
+                    "PACKAGE_BYTES",
+                    "file bytes do not match deterministic package",
+                    relative,
+                )
+            )
         if len(payload) != len(expected):
-            diagnostics.append(_diag("PACKAGE_SIZE", "file size does not match manifest", relative))
+            diagnostics.append(
+                _diag("PACKAGE_SIZE", "file size does not match manifest", relative)
+            )
         if hashlib.sha256(payload).hexdigest() != hashlib.sha256(expected).hexdigest():
-            diagnostics.append(_diag("PACKAGE_CHECKSUM", "file checksum does not match manifest", relative))
+            diagnostics.append(
+                _diag(
+                    "PACKAGE_CHECKSUM",
+                    "file checksum does not match manifest",
+                    relative,
+                )
+            )
 
-    manifest_bytes = expected_files.get(PACKAGE_MANIFEST)
-    if manifest_bytes is not None and PACKAGE_MANIFEST in actual_paths:
+    if PACKAGE_MANIFEST in actual_paths:
         try:
-            actual_manifest = json.loads((root / PACKAGE_MANIFEST).read_text(encoding="utf-8"))
+            actual_manifest = json.loads(
+                (root / PACKAGE_MANIFEST).read_text(encoding="utf-8")
+            )
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            diagnostics.append(_diag("PACKAGE_MANIFEST_JSON", str(exc), PACKAGE_MANIFEST))
+            diagnostics.append(
+                _diag("PACKAGE_MANIFEST_JSON", str(exc), PACKAGE_MANIFEST)
+            )
         else:
             if actual_manifest != expected_manifest:
                 diagnostics.append(
-                    _diag("PACKAGE_MANIFEST_BINDING", "manifest object does not match expected package", PACKAGE_MANIFEST)
+                    _diag(
+                        "PACKAGE_MANIFEST_BINDING",
+                        "manifest object does not match expected package",
+                        PACKAGE_MANIFEST,
+                    )
                 )
-    return _sorted_diagnostics(diagnostics)
+    return _sorted(diagnostics)
 
 
-def _selected_model_lock(review: dict[str, Any]) -> dict[str, Any] | None:
-    if review.get("decision") != "select_model" or not isinstance(review.get("selected_model"), dict):
+def _selected_lock(review: dict[str, Any]) -> dict[str, Any] | None:
+    selected = review.get("selected_model")
+    if review.get("decision") != "select_model" or not isinstance(selected, dict):
         return None
-    selected = review["selected_model"]
     return {
         "family": selected["family"],
         "profile_ref": selected["profile_ref"],
@@ -445,6 +569,139 @@ def _selected_model_lock(review: dict[str, Any]) -> dict[str, Any] | None:
         "workflow_sha256": selected["workflow_sha256"],
         "benchmark_review_id": review["id"],
     }
+
+
+def _append_binding_diagnostics(
+    diagnostics: list[dict[str, str]],
+    review: dict[str, Any],
+    plan: dict[str, Any],
+    results: dict[str, Any],
+    manifest: dict[str, Any],
+) -> None:
+    bindings = (
+        ("plan_ref", plan.get("id"), "PLAN_BINDING"),
+        ("plan_version", plan.get("version"), "PLAN_BINDING"),
+        ("plan_sha256", canonical_sha256(plan), "PLAN_BINDING"),
+        ("results_ref", results.get("id"), "RESULTS_BINDING"),
+        ("results_version", results.get("version"), "RESULTS_BINDING"),
+        ("results_sha256", result_set_sha256(results), "RESULTS_BINDING"),
+        ("package_ref", manifest.get("id"), "PACKAGE_BINDING"),
+        (
+            "package_sha256",
+            hashlib.sha256(document_bytes(manifest)).hexdigest(),
+            "PACKAGE_BINDING",
+        ),
+    )
+    for field, expected, code in bindings:
+        if review.get(field) != expected:
+            diagnostics.append(
+                _diag(code, f"{field} does not match exact evidence", field)
+            )
+
+
+def _append_run_diagnostics(
+    diagnostics: list[dict[str, str]],
+    review: dict[str, Any],
+    results: dict[str, Any],
+    plan: dict[str, Any],
+) -> None:
+    entries = {
+        entry["run_id"]: entry
+        for entry in results["results"]
+        if isinstance(entry, dict) and isinstance(entry.get("run_id"), str)
+    }
+    for field in ("accepted_run_ids", "rejected_run_ids"):
+        for run_id in review.get(field, []):
+            if run_id not in entries:
+                diagnostics.append(
+                    _diag("UNKNOWN_RUN", f"unknown run ID: {run_id}", field)
+                )
+
+    if review.get("decision") != "select_model" or not isinstance(
+        review.get("selected_model"), dict
+    ):
+        return
+    selected = review["selected_model"]
+    models = [
+        model
+        for model in plan["models"]
+        if model["family"] == selected.get("family")
+    ]
+    if len(models) != 1:
+        diagnostics.append(
+            _diag(
+                "SELECTED_MODEL",
+                "selected family is not unique in the plan",
+                "selected_model.family",
+            )
+        )
+    else:
+        model = models[0]
+        expected_selected = {
+            "family": model["family"],
+            "profile_ref": f"{model['profile_id']}@{model['profile_version']}",
+            "profile_sha256": model["profile_sha256"],
+            "workflow_sha256": model["workflow_sha256"],
+        }
+        for key, expected in expected_selected.items():
+            if selected.get(key) != expected:
+                diagnostics.append(
+                    _diag(
+                        "SELECTED_MODEL_BINDING",
+                        f"{key} does not match the plan",
+                        f"selected_model.{key}",
+                    )
+                )
+
+    accepted_entries: list[dict[str, Any]] = []
+    for run_id in review["accepted_run_ids"]:
+        entry = entries.get(run_id)
+        if entry is None:
+            continue
+        accepted_entries.append(entry)
+        if entry.get("state") != "succeeded":
+            diagnostics.append(
+                _diag(
+                    "ACCEPTED_RUN_FAILED",
+                    f"accepted run is not successful: {run_id}",
+                    "accepted_run_ids",
+                )
+            )
+        if entry.get("model_family") != selected.get("family"):
+            diagnostics.append(
+                _diag(
+                    "ACCEPTED_RUN_FAMILY",
+                    f"accepted run belongs to another family: {run_id}",
+                    "accepted_run_ids",
+                )
+            )
+    seeds = {entry.get("seed") for entry in accepted_entries}
+    cases = {entry.get("prompt_case_id") for entry in accepted_entries}
+    if len(seeds) < MIN_ACCEPTED_SEEDS:
+        diagnostics.append(
+            _diag(
+                "ACCEPTED_SEED_DIVERSITY",
+                f"at least {MIN_ACCEPTED_SEEDS} distinct accepted seeds are required",
+                "accepted_run_ids",
+            )
+        )
+    if len(cases) < MIN_ACCEPTED_CASES:
+        diagnostics.append(
+            _diag(
+                "ACCEPTED_CASE_DIVERSITY",
+                f"at least {MIN_ACCEPTED_CASES} distinct accepted prompt cases are required",
+                "accepted_run_ids",
+            )
+        )
+    missing_cases = sorted(REQUIRED_ACCEPTED_CASES - cases)
+    if missing_cases:
+        diagnostics.append(
+            _diag(
+                "REQUIRED_ACCEPTED_CASE",
+                f"missing required accepted cases: {', '.join(missing_cases)}",
+                "accepted_run_ids",
+            )
+        )
 
 
 def validate_review(
@@ -466,99 +723,17 @@ def validate_review(
         result_root=result_root,
     )
     diagnostics.extend(result_diagnostics)
-    if diagnostics or not isinstance(review, dict) or not isinstance(results, dict) or not isinstance(plan, dict):
-        return _sorted_diagnostics(diagnostics), None
+    if diagnostics or not isinstance(review, dict) or not isinstance(
+        results, dict
+    ) or not isinstance(plan, dict):
+        return _sorted(diagnostics), None
 
-    expected_manifest, expected_files = build_contact_sheet_package(results, images)
-    diagnostics.extend(validate_package(package_root, expected_manifest, expected_files))
-
-    bindings = (
-        ("plan_ref", plan.get("id"), "PLAN_BINDING"),
-        ("plan_version", plan.get("version"), "PLAN_BINDING"),
-        ("plan_sha256", canonical_sha256(plan), "PLAN_BINDING"),
-        ("results_ref", results.get("id"), "RESULTS_BINDING"),
-        ("results_version", results.get("version"), "RESULTS_BINDING"),
-        ("results_sha256", result_set_sha256(results), "RESULTS_BINDING"),
-        ("package_ref", expected_manifest.get("id"), "PACKAGE_BINDING"),
-        ("package_sha256", hashlib.sha256(document_bytes(expected_manifest)).hexdigest(), "PACKAGE_BINDING"),
-    )
-    for field, expected, code in bindings:
-        if review.get(field) != expected:
-            diagnostics.append(_diag(code, f"{field} does not match exact evidence", field))
-
-    entries = {
-        entry["run_id"]: entry
-        for entry in results["results"]
-        if isinstance(entry, dict) and isinstance(entry.get("run_id"), str)
-    }
-    for field in ("accepted_run_ids", "rejected_run_ids"):
-        for run_id in review.get(field, []):
-            if run_id not in entries:
-                diagnostics.append(_diag("UNKNOWN_RUN", f"unknown run ID: {run_id}", field))
-
-    if review.get("decision") == "select_model" and isinstance(review.get("selected_model"), dict):
-        selected = review["selected_model"]
-        matches = [
-            model
-            for model in plan["models"]
-            if model["family"] == selected.get("family")
-        ]
-        if len(matches) != 1:
-            diagnostics.append(_diag("SELECTED_MODEL", "selected family is not unique in the plan", "selected_model.family"))
-        else:
-            model = matches[0]
-            expected_selected = {
-                "family": model["family"],
-                "profile_ref": f"{model['profile_id']}@{model['profile_version']}",
-                "profile_sha256": model["profile_sha256"],
-                "workflow_sha256": model["workflow_sha256"],
-            }
-            for key, expected in expected_selected.items():
-                if selected.get(key) != expected:
-                    diagnostics.append(
-                        _diag("SELECTED_MODEL_BINDING", f"{key} does not match the plan", f"selected_model.{key}")
-                    )
-
-        accepted_entries: list[dict[str, Any]] = []
-        for run_id in review["accepted_run_ids"]:
-            entry = entries.get(run_id)
-            if entry is None:
-                continue
-            accepted_entries.append(entry)
-            if entry.get("state") != "succeeded":
-                diagnostics.append(_diag("ACCEPTED_RUN_FAILED", f"accepted run is not successful: {run_id}", "accepted_run_ids"))
-            if entry.get("model_family") != selected.get("family"):
-                diagnostics.append(_diag("ACCEPTED_RUN_FAMILY", f"accepted run belongs to another family: {run_id}", "accepted_run_ids"))
-        seeds = {entry.get("seed") for entry in accepted_entries}
-        cases = {entry.get("prompt_case_id") for entry in accepted_entries}
-        if len(seeds) < MIN_ACCEPTED_SEEDS:
-            diagnostics.append(
-                _diag(
-                    "ACCEPTED_SEED_DIVERSITY",
-                    f"at least {MIN_ACCEPTED_SEEDS} distinct accepted seeds are required",
-                    "accepted_run_ids",
-                )
-            )
-        if len(cases) < MIN_ACCEPTED_CASES:
-            diagnostics.append(
-                _diag(
-                    "ACCEPTED_CASE_DIVERSITY",
-                    f"at least {MIN_ACCEPTED_CASES} distinct accepted prompt cases are required",
-                    "accepted_run_ids",
-                )
-            )
-        missing_cases = sorted(REQUIRED_ACCEPTED_CASES - cases)
-        if missing_cases:
-            diagnostics.append(
-                _diag(
-                    "REQUIRED_ACCEPTED_CASE",
-                    f"missing required accepted cases: {', '.join(missing_cases)}",
-                    "accepted_run_ids",
-                )
-            )
-
-    diagnostics = _sorted_diagnostics(diagnostics)
-    return diagnostics, _selected_model_lock(review) if not diagnostics else None
+    manifest, files = build_contact_sheet_package(results, images)
+    diagnostics.extend(validate_package(package_root, manifest, files))
+    _append_binding_diagnostics(diagnostics, review, plan, results, manifest)
+    _append_run_diagnostics(diagnostics, review, results, plan)
+    diagnostics = _sorted(diagnostics)
+    return diagnostics, _selected_lock(review) if not diagnostics else None
 
 
 def _result(
@@ -567,7 +742,10 @@ def _result(
     review: dict[str, Any] | None = None,
     selected_model_lock: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    output: dict[str, Any] = {"ok": not diagnostics, "diagnostics": _sorted_diagnostics(diagnostics)}
+    output: dict[str, Any] = {
+        "ok": not diagnostics,
+        "diagnostics": _sorted(diagnostics),
+    }
     if review is not None:
         output["review_id"] = review.get("id")
         output["decision"] = review.get("decision")
@@ -577,7 +755,9 @@ def _result(
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Validate owner benchmark review without mutation")
+    parser = argparse.ArgumentParser(
+        description="Validate owner benchmark review without mutation"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     command = sub.add_parser("review-check")
     command.add_argument("review", type=Path)
@@ -605,11 +785,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             result_root=args.result_root,
             package_root=args.package_root,
         )
-        output = _result(diagnostics, review=review, selected_model_lock=selected)
+        output = _result(
+            diagnostics,
+            review=review,
+            selected_model_lock=selected,
+        )
     except (BenchmarkReviewError, ValueError, OSError) as exc:
-        diagnostic = exc.to_dict() if isinstance(exc, BenchmarkReviewError) else _diag("ERROR", str(exc))
+        diagnostic = (
+            exc.to_dict()
+            if isinstance(exc, BenchmarkReviewError)
+            else _diag("ERROR", str(exc))
+        )
         output = _result([diagnostic])
-    print(json.dumps(output, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
+    print(
+        json.dumps(
+            output,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
     return 0 if output["ok"] else 1
 
 
