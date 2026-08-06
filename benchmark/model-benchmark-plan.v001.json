@@ -29,7 +29,7 @@
       "workflow_sha256": "e45b7f2c8acf4f1e5167025d722075d068664ba98611be2efa7740fb93a6cfaf",
       "native_width": 1024,
       "native_height": 1024,
-      "sampler": "euler_ancestral",
+      "sampler": "euler-ancestral",
       "scheduler": "normal",
       "steps": 28,
       "cfg": 5.0,
@@ -46,7 +46,7 @@
       "workflow_sha256": "eaab0b4bf5577488d8b6ac472ecfadb7ca00352d45570b9ce5bb860a099f0e9b",
       "native_width": 1024,
       "native_height": 1024,
-      "sampler": "euler_ancestral",
+      "sampler": "euler-ancestral",
       "scheduler": "normal",
       "steps": 28,
       "cfg": 5.0,
@@ -63,7 +63,7 @@
       "workflow_sha256": "bbb0ea8189fb7aba637117c7c1ea56dedb4a0510e9ab1932334d5b460335e248",
       "native_width": 1024,
       "native_height": 1024,
-      "sampler": "er_sde",
+      "sampler": "er-sde",
       "scheduler": "simple",
       "steps": 40,
       "cfg": 4.5,
@@ -137,7 +137,7 @@
       "expression": "comedic-exchange"
     }
   ],
-  "output_root": "local/benchmark-output",
+  "output_root": "ai-illustration-benchmark",
   "selection_policy": "owner-only",
-  "notes": "This plan benchmarks three exact model families using identical seeds and six required cases. Anima Aesthetic is evaluation-only and cannot receive a production selected-model lock."
+  "notes": "This plan benchmarks three exact model families using identical seeds and six required cases. Anima Aesthetic is evaluation-only and cannot receive a production selected-model lock. Sampler tokens use hyphenated plan aliases and are bound to exact ComfyUI underscore names by the checksum-bound installation manifest and run package."
 }
