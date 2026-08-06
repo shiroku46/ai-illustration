@@ -1,0 +1,108 @@
+{
+  "kind": "art-direction-profile",
+  "schema_version": "1.0",
+  "id": "manzai-duo-test-art-direction",
+  "version": "v001",
+  "status": "reviewing",
+  "roles": [
+    {
+      "role": "boke",
+      "silhouette": "Tall, relaxed full-body silhouette with asymmetrical pointing gesture and one hand at the hip.",
+      "body_ratio": "Long-legged anime proportion, approximately seven to eight heads tall.",
+      "head_exaggeration": "Slightly enlarged anime head while preserving a slender adult silhouette.",
+      "hand_exaggeration": "Hands remain readable and lightly emphasized for comedic gestures.",
+      "foot_exaggeration": "Shoes are clearly readable with modest stylization and stable contact with the ground.",
+      "costume_construction": "Black cap, short black bob, white collared shirt, brown necktie, dark suspenders, high-waisted loose dark trousers, and black ankle shoes.",
+      "palette": [
+        "black hair and cap",
+        "white shirt",
+        "dark brown suspenders and trousers",
+        "muted brown tie",
+        "blue eyes"
+      ],
+      "line_behavior": "Clean anime contour with limited internal linework; benchmark target should introduce slight handmade variation without losing readability.",
+      "eye_design": "Large rounded blue anime eyes with simple highlights and restrained lashes.",
+      "shading_ceiling": "Flat color with one restrained cel-shadow layer; no glossy or cinematic rendering.",
+      "front_full_body_neutral_target": "Preserve the complete costume and proportions in a near-front full-body standing reference with readable hands and shoes.",
+      "background_isolation_target": "Transparent or plain white background with no props, text, architecture, or scenery.",
+      "identity_anchors": [
+        "black asymmetrical cap",
+        "short black bob with straight bangs",
+        "blue eyes",
+        "white shirt with dark suspenders",
+        "brown tie and loose dark trousers"
+      ],
+      "prohibited_ai_traits": [
+        "generic mobile-game face",
+        "overly polished uniform linework",
+        "fused pointing fingers",
+        "incoherent suspenders or tie",
+        "unintended photorealistic or 2.5D finish"
+      ]
+    },
+    {
+      "role": "tsukkomi",
+      "silhouette": "Upright slim suit silhouette with open presenting palm, closed opposite fist, and long tied-back hair.",
+      "body_ratio": "Long-legged anime proportion, approximately seven to eight heads tall, slightly narrower and more formal than the boke.",
+      "head_exaggeration": "Moderately enlarged anime head with a sharper, more assertive expression.",
+      "hand_exaggeration": "Open palm and closed fist must remain anatomically readable for emphatic responses.",
+      "foot_exaggeration": "Low formal shoes remain clearly separated from trouser hems and grounded.",
+      "costume_construction": "Bright blue tailored jacket, white collared shirt, vivid orange tie, dark blue flared trousers, brown formal shoes, and long brown ponytail with shell-like orange hair ornaments.",
+      "palette": [
+        "bright blue jacket",
+        "dark blue trousers",
+        "orange tie and hair ornaments",
+        "brown hair and shoes",
+        "magenta eyes"
+      ],
+      "line_behavior": "Simple crisp anime contour with sparse interior detail and flat fills; preserve clarity while avoiding sterile vector uniformity.",
+      "eye_design": "Narrower magenta anime eyes supporting a confident, teasing tsukkomi expression.",
+      "shading_ceiling": "Mostly flat color with at most one light cel-shadow layer; no complex highlights or volumetric lighting.",
+      "front_full_body_neutral_target": "Preserve the suit construction, long ponytail, ornaments, hand gesture, trousers, and shoes in a near-front full-body standing reference.",
+      "background_isolation_target": "Transparent or plain white background with no props, text, architecture, or scenery.",
+      "identity_anchors": [
+        "long brown ponytail",
+        "paired orange shell-like hair ornaments",
+        "magenta eyes",
+        "bright blue suit jacket",
+        "orange tie and dark blue trousers"
+      ],
+      "prohibited_ai_traits": [
+        "generic mobile-game face",
+        "melted open palm or closed fist",
+        "incoherent jacket lapels or pockets",
+        "hair ornament duplication",
+        "unintended glossy 2.5D finish"
+      ]
+    }
+  ],
+  "global_anti_goals": [
+    "uniform_polished_linework",
+    "generic_mobile_game_face",
+    "over_rendered_lighting",
+    "accidental_architecture_or_background_objects",
+    "anatomical_collapse",
+    "fused_or_missing_hands_or_limbs",
+    "incoherent_clothing",
+    "unintended_2_5d_rendering"
+  ],
+  "visual_references": [
+    {
+      "id": "boke-rakuko-test-reference",
+      "role": "boke",
+      "path": "boke-rakuko.png",
+      "media_type": "image/png",
+      "sha256": "5d5d67ecca13eebfb762b8251ea0bb00481951d79dcd46c9e44986fc2d069e69",
+      "purpose": "Owner-supplied test full-body reference for the boke role. Stored outside Git as an owner-controlled local input."
+    },
+    {
+      "id": "tsukkomi-sakura-test-reference",
+      "role": "tsukkomi",
+      "path": "tsukkomi-sakura.png",
+      "media_type": "image/png",
+      "sha256": "474465adea571e35a1c722fe96e910f75bdf919f43927cb2ba366186ea672303",
+      "purpose": "Owner-supplied test full-body reference for the tsukkomi role. Stored outside Git as an owner-controlled local input."
+    }
+  ],
+  "notes": "Provisional test-only art direction inferred from the two owner-supplied standing illustrations. Requires explicit owner approval before benchmark authorization."
+}
