@@ -11,7 +11,7 @@
     "profile_sha256": "ba85bc9f2539731c1b40d37c29413f9b7dba0be2e9b2ea09b8bf40abe9745cf6",
     "review_path": "art-direction/manzai-duo-test-art-direction.v001.owner-review.json",
     "review_id": "art-review-cd2c8e7517a69f45",
-    "review_sha256": "cd659343fd3f82631bc118c224906ced8f771e894b80d4e5a1b1ba97ad17c20c"
+    "review_sha256": "d1be9765e88d340336ed79f2f0737ec9f061377ae1774cb4611c7e49c830df12"
   },
   "hardware": {
     "path": "benchmark/hardware/owner-rtx4060-windows.v001.json",
