@@ -10,7 +10,7 @@
   <header>
     <p class="eyebrow">LOCAL REVIEW</p>
     <h1>漫才キャラクター候補比較</h1>
-    <p>最大4候補を比較し、レビューJSONをブラウザ内で作成します。サーバー側への書き込みは行いません。</p>
+    <p>最大4候補を比較し、品質段階を明示したレビューJSONをブラウザ内で作成します。サーバー側への書き込みは行いません。</p>
   </header>
   <main>
     <section class="panel filters" aria-label="filters">
@@ -29,12 +29,17 @@
     </section>
     <section class="panel review-form">
       <h2>レビューを書き出す</h2>
+      <p><strong>transport_smoke_output</strong> は通信・保存経路の証拠のみです。<strong>creative_candidate</strong> は所有者による明示的な創作レビュー結果です。</p>
       <label>対象候補 <select id="review-candidate"></select></label>
+      <label>レビュー範囲 <select id="review-scope"></select></label>
       <label>判定 <select id="decision"></select></label>
       <label>レビュアー <input id="reviewer" required autocomplete="off"></label>
-      <fieldset><legend>指摘カテゴリ</legend><div id="category-list" class="category-list"></div></fieldset>
+      <p>結果品質段階: <output id="resulting-quality-stage">—</output></p>
+      <p id="review-gate-status" class="gate-status" role="status">比較ボードから対象候補を選んでください。</p>
+      <fieldset><legend>通常の指摘カテゴリ</legend><div id="category-list" class="category-list"></div></fieldset>
+      <fieldset><legend>ハード失敗カテゴリ</legend><div id="hard-fail-list" class="category-list"></div></fieldset>
       <label>メモ <textarea id="notes" rows="4"></textarea></label>
-      <button id="download-review" type="button">レビューJSONをダウンロード</button>
+      <button id="download-review" type="button" disabled>レビューJSONをダウンロード</button>
       <pre id="review-preview" aria-live="polite"></pre>
     </section>
   </main>

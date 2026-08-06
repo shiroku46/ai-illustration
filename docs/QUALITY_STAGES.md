@@ -36,7 +36,19 @@ The backend review contract and variant planner enforce the following sequence:
 
 Technical status and creative status remain separate. `technically_valid` means that the bytes and declared metadata passed technical checks; it does not mean that the image is approved as a character identity.
 
-The loopback review API remains read-only and exposes the quality vocabulary and current status. The backend review contract can create quality-aware review documents without persisting them. Until the browser controls are updated, review JSON downloaded by the older browser form remains a readable legacy record and is intentionally rejected by variant planning rather than being silently promoted.
+## Browser review workspace
+
+The loopback review workspace remains read-only and local-only. Candidate cards and comparison cards display these facts separately:
+
+- technical status;
+- packaged quality stage;
+- latest review scope;
+- latest resulting quality stage;
+- latest hard-fail categories.
+
+The review form defaults explicitly to `technical`. Creative scope is enabled only for a live, SHA-256-verifiable `technical_candidate`; smoke output, a missing or unknown packaged stage, an unavailable image, an invalid technical status, unavailable Web Crypto, or a checksum failure closes the creative control. Accept and shortlist also require a freshly fetched matching PNG.
+
+Every downloaded review contains the complete quality field group. Its ID is generated with Web Crypto SHA-256 over the same semantic identity as the backend: candidate ID, request ID, candidate checksum, reviewer, decision, scope, resulting stage, timestamp, sorted ordinary categories, and sorted hard-fail categories. The preview contains the exact JSON bytes used for the download. No browser storage, telemetry, upload, server mutation, remote asset, or external dependency is used.
 
 ## Hard-fail categories
 
