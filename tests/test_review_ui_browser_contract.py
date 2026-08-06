@@ -55,7 +55,7 @@ class ReviewUIBrowserContractTest(unittest.TestCase):
             "timestamp,",
             'categories.join(","),',
             'hardFailCategories.join(","),',
-            ').join("\\n")',
+            '].join("\\n")',
             "crypto.subtle.digest(\"SHA-256\"",
             "digestHex(digest).slice(0, 12)",
             "`review-${candidateId}-${digestHex(digest).slice(0, 12)}`",
