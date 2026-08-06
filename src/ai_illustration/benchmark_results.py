@@ -20,12 +20,7 @@ from typing import Any, Iterable, Sequence
 import zlib
 
 from .art_direction import load_document
-from .model_benchmark import (
-    canonical_sha256,
-    expand_matrix,
-    validate_dependencies,
-    validate_plan,
-)
+from .model_benchmark import canonical_sha256, expand_matrix, validate_dependencies, validate_plan
 from .naming import SHA256_RE, TOKEN_RE, VERSION_RE, canonical_json, safe_relative_path
 
 RESULTS_KIND = "model-benchmark-results"
@@ -41,57 +36,25 @@ PACKAGE_MANIFEST = "contact-sheet-manifest.json"
 SHEETS_DIR = "contact-sheets"
 
 RESULTS_FIELDS = frozenset(
-    {
-        "kind",
-        "schema_version",
-        "id",
-        "version",
-        "plan_ref",
-        "plan_version",
-        "plan_sha256",
-        "results",
-        "notes",
-    }
+    {"kind", "schema_version", "id", "version", "plan_ref", "plan_version", "plan_sha256", "results", "notes"}
 )
 RESULTS_REQUIRED = RESULTS_FIELDS - {"notes"}
 ENTRY_COMMON = frozenset(
     {
-        "run_id",
-        "state",
-        "model_family",
-        "model_profile_ref",
-        "model_profile_sha256",
-        "workflow_sha256",
-        "seed",
-        "prompt_case_id",
-        "role_scope",
-        "settings",
-        "elapsed_ms",
-        "peak_vram_mib",
+        "run_id", "state", "model_family", "model_profile_ref", "model_profile_sha256",
+        "workflow_sha256", "seed", "prompt_case_id", "role_scope", "settings",
+        "elapsed_ms", "peak_vram_mib",
     }
 )
-SUCCESS_FIELDS = ENTRY_COMMON | frozenset(
-    {"image_path", "image_sha256", "width", "height"}
-)
-FAILURE_FIELDS = ENTRY_COMMON | frozenset({"error"})
 ENTRY_REQUIRED_COMMON = ENTRY_COMMON - {"peak_vram_mib"}
-SETTINGS_FIELDS = frozenset(
-    {"width", "height", "sampler", "scheduler", "steps", "cfg", "prompt_format"}
-)
+SUCCESS_FIELDS = ENTRY_COMMON | frozenset({"image_path", "image_sha256", "width", "height"})
+FAILURE_FIELDS = ENTRY_COMMON | frozenset({"error"})
+SETTINGS_FIELDS = frozenset({"width", "height", "sampler", "scheduler", "steps", "cfg", "prompt_format"})
 ERROR_FIELDS = frozenset({"code", "message"})
 FORBIDDEN_DECISION_TERMS = frozenset(
     {
-        "aesthetic_score",
-        "score",
-        "rank",
-        "ranking",
-        "winner",
-        "approved",
-        "approval",
-        "recommendation",
-        "recommended",
-        "selected",
-        "selection",
+        "aesthetic_score", "score", "rank", "ranking", "winner", "approved", "approval",
+        "recommendation", "recommended", "selected", "selection",
     }
 )
 
@@ -114,9 +77,7 @@ def _diag(code: str, message: str, field: str = "") -> dict[str, str]:
 def _sorted_diagnostics(values: Iterable[dict[str, str]]) -> list[dict[str, str]]:
     unique = {
         (item.get("field", ""), item.get("code", ""), item.get("message", "")): {
-            "code": item.get("code", ""),
-            "message": item.get("message", ""),
-            "field": item.get("field", ""),
+            "code": item.get("code", ""), "message": item.get("message", ""), "field": item.get("field", "")
         }
         for item in values
     }
@@ -136,11 +97,7 @@ def _nonempty(value: Any) -> bool:
 
 
 def _check_fields(
-    value: Any,
-    *,
-    required: frozenset[str],
-    allowed: frozenset[str],
-    field: str,
+    value: Any, *, required: frozenset[str], allowed: frozenset[str], field: str
 ) -> list[dict[str, str]]:
     if not isinstance(value, dict):
         return [_diag("OBJECT_REQUIRED", "must be an object", field)]
@@ -164,36 +121,31 @@ def _check_fields(
 
 
 def _token(value: Any, field: str) -> list[dict[str, str]]:
-    if not isinstance(value, str) or not TOKEN_RE.fullmatch(value):
-        return [_diag("INVALID_TOKEN", "must be a lowercase ASCII token", field)]
-    return []
+    return [] if isinstance(value, str) and TOKEN_RE.fullmatch(value) else [
+        _diag("INVALID_TOKEN", "must be a lowercase ASCII token", field)
+    ]
 
 
 def _checksum(value: Any, field: str) -> list[dict[str, str]]:
-    if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
-        return [_diag("CHECKSUM", "must be 64 lowercase hexadecimal characters", field)]
-    return []
+    return [] if isinstance(value, str) and SHA256_RE.fullmatch(value) else [
+        _diag("CHECKSUM", "must be 64 lowercase hexadecimal characters", field)
+    ]
 
 
 def _nonnegative_integer(value: Any, field: str) -> list[dict[str, str]]:
-    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-        return [_diag("NONNEGATIVE_INTEGER", "must be a non-negative integer", field)]
-    return []
+    return [] if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else [
+        _diag("NONNEGATIVE_INTEGER", "must be a non-negative integer", field)
+    ]
 
 
 def _positive_integer(value: Any, field: str) -> list[dict[str, str]]:
-    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-        return [_diag("POSITIVE_INTEGER", "must be a positive integer", field)]
-    return []
+    return [] if isinstance(value, int) and not isinstance(value, bool) and value > 0 else [
+        _diag("POSITIVE_INTEGER", "must be a positive integer", field)
+    ]
 
 
 def _validate_settings(value: Any, field: str) -> list[dict[str, str]]:
-    diagnostics = _check_fields(
-        value,
-        required=SETTINGS_FIELDS,
-        allowed=SETTINGS_FIELDS,
-        field=field,
-    )
+    diagnostics = _check_fields(value, required=SETTINGS_FIELDS, allowed=SETTINGS_FIELDS, field=field)
     if not isinstance(value, dict):
         return diagnostics
     for name in ("width", "height", "steps"):
@@ -213,14 +165,15 @@ def _validate_entry(value: Any, index: int) -> list[dict[str, str]]:
     if not isinstance(value, dict):
         return [_diag("OBJECT_REQUIRED", "result entry must be an object", field)]
     state = value.get("state")
-    allowed = SUCCESS_FIELDS if state == "succeeded" else FAILURE_FIELDS if state == "failed" else ENTRY_COMMON
-    required = (
-        ENTRY_REQUIRED_COMMON | frozenset({"image_path", "image_sha256", "width", "height"})
-        if state == "succeeded"
-        else ENTRY_REQUIRED_COMMON | frozenset({"error"})
-        if state == "failed"
-        else ENTRY_REQUIRED_COMMON
-    )
+    if state == "succeeded":
+        allowed = SUCCESS_FIELDS
+        required = ENTRY_REQUIRED_COMMON | frozenset({"image_path", "image_sha256", "width", "height"})
+    elif state == "failed":
+        allowed = FAILURE_FIELDS
+        required = ENTRY_REQUIRED_COMMON | frozenset({"error"})
+    else:
+        allowed = ENTRY_COMMON
+        required = ENTRY_REQUIRED_COMMON
     diagnostics = _check_fields(value, required=required, allowed=allowed, field=field)
     if state not in EXECUTION_STATES:
         diagnostics.append(_diag("EXECUTION_STATE", "state must be succeeded or failed", f"{field}.state"))
@@ -270,12 +223,7 @@ def _validate_entry(value: Any, index: int) -> list[dict[str, str]]:
 
 
 def validate_document(results: Any) -> list[dict[str, str]]:
-    diagnostics = _check_fields(
-        results,
-        required=RESULTS_REQUIRED,
-        allowed=RESULTS_FIELDS,
-        field="results_document",
-    )
+    diagnostics = _check_fields(results, required=RESULTS_REQUIRED, allowed=RESULTS_FIELDS, field="results_document")
     if not isinstance(results, dict):
         return diagnostics
     if results.get("kind") != RESULTS_KIND:
@@ -298,8 +246,7 @@ def validate_document(results: Any) -> list[dict[str, str]]:
         for index, entry in enumerate(entries):
             diagnostics.extend(_validate_entry(entry, index))
         run_ids = [
-            entry.get("run_id")
-            for entry in entries
+            entry.get("run_id") for entry in entries
             if isinstance(entry, dict) and isinstance(entry.get("run_id"), str)
         ]
         if len(run_ids) != len(set(run_ids)):
@@ -367,8 +314,8 @@ def _parse_png(payload: bytes) -> tuple[int, int]:
     if not payload.startswith(PNG_SIGNATURE):
         raise BenchmarkResultsError("PNG_SIGNATURE", "invalid PNG signature", "image")
     offset = len(PNG_SIGNATURE)
-    width = height = channels = -1
-    seen_ihdr = seen_idat = seen_iend = False
+    width = height = channels = color_type = -1
+    seen_ihdr = seen_plte = seen_idat = seen_iend = False
     idat_closed = False
     compressed = bytearray()
     while offset < len(payload):
@@ -406,6 +353,10 @@ def _parse_png(payload: bytes) -> tuple[int, int]:
                 raise BenchmarkResultsError("PNG_FORMAT", "unsupported compression, filtering, or interlace", "image")
             channels = {2: 3, 4: 2, 6: 4}[color_type]
             seen_ihdr = True
+        elif kind == b"PLTE":
+            if seen_plte or seen_idat or color_type == 4 or length == 0 or length > 768 or length % 3:
+                raise BenchmarkResultsError("PNG_PLTE", "invalid PLTE placement or length", "image")
+            seen_plte = True
         elif kind == b"IDAT":
             if idat_closed:
                 raise BenchmarkResultsError("PNG_STRUCTURE", "IDAT chunks must be consecutive", "image")
@@ -421,7 +372,7 @@ def _parse_png(payload: bytes) -> tuple[int, int]:
             break
         elif kind in {b"acTL", b"fcTL", b"fdAT"}:
             raise BenchmarkResultsError("PNG_ANIMATION", "animated PNG chunks are forbidden", "image")
-        elif 65 <= kind[0] <= 90 and kind != b"PLTE":
+        elif 65 <= kind[0] <= 90:
             raise BenchmarkResultsError("PNG_CRITICAL_CHUNK", f"unsupported critical chunk {kind!r}", "image")
         offset = end
 
@@ -437,8 +388,7 @@ def _parse_png(payload: bytes) -> tuple[int, int]:
         raw = decoder.decompress(bytes(compressed), expected + 1)
         if len(raw) > expected or decoder.unconsumed_tail:
             raise BenchmarkResultsError("PNG_DECODE_LIMIT", "decoded PNG exceeds IHDR-derived length", "image")
-        remaining = expected - len(raw)
-        raw += decoder.flush(max(1, remaining + 1))
+        raw += decoder.flush(max(1, expected - len(raw) + 1))
     except BenchmarkResultsError:
         raise
     except zlib.error as exc:
@@ -454,15 +404,11 @@ def _parse_png(payload: bytes) -> tuple[int, int]:
 
 def _expected_common(row: dict[str, Any]) -> dict[str, Any]:
     return {
-        "run_id": row["run_id"],
-        "model_family": row["model_family"],
-        "model_profile_ref": row["model_profile_ref"],
-        "model_profile_sha256": row["model_profile_sha256"],
-        "workflow_sha256": row["workflow_sha256"],
-        "seed": row["seed"],
-        "prompt_case_id": row["prompt_case_id"],
-        "role_scope": row["role_scope"],
-        "settings": row["settings"],
+        key: row[key]
+        for key in (
+            "run_id", "model_family", "model_profile_ref", "model_profile_sha256",
+            "workflow_sha256", "seed", "prompt_case_id", "role_scope", "settings",
+        )
     }
 
 
@@ -483,8 +429,7 @@ def validate_results(
         diagnostics.append(_diag("PLAN_BINDING", "plan_ref does not match", "plan_ref"))
     if results.get("plan_version") != plan.get("version"):
         diagnostics.append(_diag("PLAN_BINDING", "plan_version does not match", "plan_version"))
-    expected_plan_sha = canonical_sha256(plan)
-    if results.get("plan_sha256") != expected_plan_sha:
+    if results.get("plan_sha256") != canonical_sha256(plan):
         diagnostics.append(_diag("PLAN_BINDING", "plan_sha256 does not match canonical plan", "plan_sha256"))
 
     expected_rows = {row["run_id"]: row for row in expand_matrix(plan)}
@@ -510,24 +455,16 @@ def validate_results(
         expected = expected_rows.get(entry["run_id"])
         if expected is None:
             continue
-        for key, value in _expected_common(expected).items():
-            if entry.get(key) != value:
+        for key, expected_value in _expected_common(expected).items():
+            if entry.get(key) != expected_value:
                 diagnostics.append(
-                    _diag(
-                        "RUN_BINDING",
-                        f"{key} does not match benchmark matrix",
-                        f"results[{index}].{key}",
-                    )
+                    _diag("RUN_BINDING", f"{key} does not match benchmark matrix", f"results[{index}].{key}")
                 )
         if entry.get("state") != "succeeded" or root is None:
             continue
         if entry.get("image_path") != expected["image_path"]:
             diagnostics.append(
-                _diag(
-                    "IMAGE_PATH_BINDING",
-                    f"expected {expected['image_path']}",
-                    f"results[{index}].image_path",
-                )
+                _diag("IMAGE_PATH_BINDING", f"expected {expected['image_path']}", f"results[{index}].image_path")
             )
             continue
         payload, values = _read_image(root, str(entry.get("image_path", "")), f"results[{index}].image_path")
@@ -543,20 +480,26 @@ def validate_results(
             continue
         if width != entry.get("width") or height != entry.get("height"):
             diagnostics.append(
-                _diag(
-                    "IMAGE_DIMENSIONS",
-                    f"PNG dimensions are {width}x{height}",
-                    f"results[{index}]",
-                )
+                _diag("IMAGE_DIMENSIONS", f"PNG dimensions are {width}x{height}", f"results[{index}]")
             )
         images[entry["run_id"]] = payload
     return _sorted_diagnostics(diagnostics), images
 
 
+def _xml_safe(value: str) -> str:
+    return "".join(
+        character
+        if character in "\t\n\r" or 0x20 <= ord(character) <= 0xD7FF or 0xE000 <= ord(character) <= 0xFFFD
+        else "\uFFFD"
+        for character in value
+    )
+
+
 def _svg_text(x: int, y: int, text: str, *, size: int = 16, weight: str = "normal") -> str:
+    escaped = html.escape(_xml_safe(text))
     return (
         f'<text x="{x}" y="{y}" font-family="monospace" font-size="{size}" '
-        f'font-weight="{weight}" fill="#202020">{html.escape(text)}</text>'
+        f'font-weight="{weight}" fill="#202020">{escaped}</text>'
     )
 
 
@@ -568,7 +511,7 @@ def _contact_sheet_svg(
 ) -> bytes:
     columns = 4
     tile_width = 300
-    tile_height = 350
+    tile_height = 390
     margin = 24
     header = 72
     rows = math.ceil(len(entries) / columns)
@@ -586,33 +529,37 @@ def _contact_sheet_svg(
         row = index // columns
         x = margin + column * tile_width
         y = header + row * tile_height
-        parts.append(f'<rect x="{x + 4}" y="{y + 4}" width="{tile_width - 8}" height="{tile_height - 8}" rx="8" fill="#fffdf7" stroke="#27231f" stroke-width="2"/>')
+        parts.append(
+            f'<rect x="{x + 4}" y="{y + 4}" width="{tile_width - 8}" height="{tile_height - 8}" '
+            'rx="8" fill="#fffdf7" stroke="#27231f" stroke-width="2"/>'
+        )
         parts.append(_svg_text(x + 16, y + 28, f"SEED {entry['seed']}", size=16, weight="bold"))
         if entry["state"] == "succeeded":
-            payload = images[entry["run_id"]]
-            encoded = base64.b64encode(payload).decode("ascii")
+            encoded = base64.b64encode(images[entry["run_id"]]).decode("ascii")
             parts.append(
                 f'<image x="{x + 16}" y="{y + 42}" width="{tile_width - 32}" height="{tile_width - 32}" '
                 f'preserveAspectRatio="xMidYMid meet" href="data:image/png;base64,{encoded}"/>'
             )
-            parts.append(_svg_text(x + 16, y + tile_width + 28, f"OK {entry['elapsed_ms']} MS", size=14, weight="bold"))
+            parts.append(_svg_text(x + 16, y + 330, f"OK {entry['elapsed_ms']} MS", size=14, weight="bold"))
             if "peak_vram_mib" in entry:
-                parts.append(_svg_text(x + 16, y + tile_width + 48, f"VRAM {entry['peak_vram_mib']} MIB", size=13))
+                parts.append(_svg_text(x + 16, y + 351, f"VRAM {entry['peak_vram_mib']} MIB", size=13))
         else:
-            parts.append(f'<rect x="{x + 16}" y="{y + 42}" width="{tile_width - 32}" height="{tile_width - 32}" fill="#f4d8d8" stroke="#7a2020" stroke-width="2"/>')
+            parts.append(
+                f'<rect x="{x + 16}" y="{y + 42}" width="{tile_width - 32}" height="{tile_width - 32}" '
+                'fill="#f4d8d8" stroke="#7a2020" stroke-width="2"/>'
+            )
             parts.append(_svg_text(x + 28, y + 90, "EXECUTION FAILED", size=18, weight="bold"))
             parts.append(_svg_text(x + 28, y + 122, f"CODE {entry['error']['code']}", size=14, weight="bold"))
             message = " ".join(entry["error"]["message"].split())[:64]
             parts.append(_svg_text(x + 28, y + 152, message, size=12))
-            parts.append(_svg_text(x + 16, y + tile_width + 28, f"ERROR {entry['elapsed_ms']} MS", size=14, weight="bold"))
-        parts.append(_svg_text(x + 16, y + tile_height - 18, entry["run_id"], size=11))
+            parts.append(_svg_text(x + 16, y + 330, f"ERROR {entry['elapsed_ms']} MS", size=14, weight="bold"))
+        parts.append(_svg_text(x + 16, y + 374, entry["run_id"], size=11))
     parts.append("</svg>")
     return ("\n".join(parts) + "\n").encode("utf-8")
 
 
 def build_contact_sheet_package(
-    results: dict[str, Any],
-    images: dict[str, bytes],
+    results: dict[str, Any], images: dict[str, bytes]
 ) -> tuple[dict[str, Any], dict[str, bytes]]:
     groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for entry in results["results"]:
@@ -661,8 +608,10 @@ def _output_target(path: Path) -> tuple[Path, Path]:
     if lexical.exists() or lexical.is_symlink():
         raise BenchmarkResultsError("OUTPUT_EXISTS", "output directory must not already exist", "output_dir")
     parent = lexical.parent
-    if parent.is_symlink() or not parent.is_dir():
-        raise BenchmarkResultsError("OUTPUT_PARENT", "output parent must be an existing non-symlink directory", "output_dir")
+    if any(candidate.is_symlink() for candidate in (parent, *parent.parents)):
+        raise BenchmarkResultsError("OUTPUT_PARENT", "output parent path must not contain a symlink", "output_dir")
+    if not parent.is_dir():
+        raise BenchmarkResultsError("OUTPUT_PARENT", "output parent must be an existing directory", "output_dir")
     try:
         parent_resolved = parent.resolve(strict=True)
     except OSError as exc:
