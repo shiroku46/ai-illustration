@@ -1,0 +1,44 @@
+{
+  "kind": "tool-profile",
+  "schema_version": "1.0",
+  "id": "illustrious-xl-v2-0-stable",
+  "version": "v001",
+  "profile_type": "model-configuration",
+  "adapter_type": "comfyui",
+  "runtime_type": "pytorch",
+  "offline_capability": "yes",
+  "deterministic_seed_support": true,
+  "control_capabilities": [
+    "fixed-seed",
+    "text-to-image"
+  ],
+  "minimum_vram_gb": 8,
+  "minimum_ram_gb": 16,
+  "supported_operating_systems": [
+    "windows"
+  ],
+  "install_state": "uninstalled",
+  "evidence_references": [
+    {
+      "source_url": "https://huggingface.co/OnomaAIResearch/Illustrious-XL-v2.0",
+      "retrieved_at": "2026-08-06",
+      "claim": "Official model card identifies Illustrious XL v2.0 Stable as an SDXL-family illustration checkpoint under CreativeML Open RAIL-M."
+    },
+    {
+      "source_url": "https://huggingface.co/OnomaAIResearch/Illustrious-XL-v2.0/blob/main/Illustrious-XL-v2.0.safetensors",
+      "retrieved_at": "2026-08-06",
+      "claim": "Exact checkpoint filename Illustrious-XL-v2.0.safetensors; size 6938043394 bytes; SHA-256 c2a1a3eaa13d4c107dc7e00c3fe830cab427aa026362740ea094745b3422a331."
+    },
+    {
+      "source_url": "https://huggingface.co/OnomaAIResearch/Illustrious-XL-v2.0/discussions/1",
+      "retrieved_at": "2026-08-06",
+      "claim": "Official repository discussion states redistribution and commercial or non-commercial usage are governed by CreativeML Open RAIL-M; no benchmark sampler settings are inferred from this license evidence."
+    }
+  ],
+  "license_evidence_state": "approved",
+  "commercial_use_review_state": "approved",
+  "decision_state": "approved",
+  "benchmark_use_review_state": "approved",
+  "production_model_use_review_state": "approved",
+  "commercial_output_use_review_state": "approved"
+}
