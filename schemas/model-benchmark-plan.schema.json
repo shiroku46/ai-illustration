@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/model-benchmark-plan.schema.json",
+  "title": "Model benchmark plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "id",
+    "version",
+    "status",
+    "art_direction",
+    "hardware",
+    "models",
+    "seeds",
+    "prompt_cases",
+    "output_root",
+    "selection_policy"
+  ],
+  "properties": {
+    "kind": {"const": "model-benchmark-plan"},
+    "schema_version": {"const": "1.0"},
+    "id": {"$ref": "#/$defs/token"},
+    "version": {"type": "string", "pattern": "^v[0-9]{3}$"},
+    "status": {"const": "prepared"},
+    "art_direction": {"$ref": "#/$defs/artDirection"},
+    "hardware": {"$ref": "#/$defs/hardware"},
+    "models": {
+      "type": "array",
+      "minItems": 3,
+      "items": {"$ref": "#/$defs/model"}
+    },
+    "seeds": {
+      "type": "array",
+      "minItems": 8,
+      "uniqueItems": true,
+      "items": {"type": "integer", "minimum": 0}
+    },
+    "prompt_cases": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {"$ref": "#/$defs/promptCase"},
+      "allOf": [
+        {"contains": {"properties": {"id": {"const": "front-full-body-neutral"}}, "required": ["id"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"id": {"const": "three-quarter-readable-hands"}}, "required": ["id"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"id": {"const": "expressive-face-close-up"}}, "required": ["id"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"id": {"const": "seated-or-asymmetric-pose"}}, "required": ["id"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"id": {"const": "clothing-detail-stress"}}, "required": ["id"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"id": {"const": "two-character-secondary-stress"}}, "required": ["id"]}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "output_root": {"$ref": "#/$defs/relativePath"},
+    "selection_policy": {"const": "owner-only"},
+    "notes": {"type": "string", "minLength": 1}
+  },
+  "$defs": {
+    "token": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.{1,2}(?:/|$)).+$"
+    },
+    "artDirection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_path",
+        "profile_id",
+        "profile_version",
+        "profile_sha256",
+        "review_path",
+        "review_id",
+        "review_sha256"
+      ],
+      "properties": {
+        "profile_path": {"$ref": "#/$defs/relativePath"},
+        "profile_id": {"$ref": "#/$defs/token"},
+        "profile_version": {"type": "string", "pattern": "^v[0-9]{3}$"},
+        "profile_sha256": {"$ref": "#/$defs/sha256"},
+        "review_path": {"$ref": "#/$defs/relativePath"},
+        "review_id": {"$ref": "#/$defs/token"},
+        "review_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "hardware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "id", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relativePath"},
+        "id": {"$ref": "#/$defs/token"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "family",
+        "profile_path",
+        "profile_id",
+        "profile_version",
+        "profile_sha256",
+        "workflow_path",
+        "workflow_sha256",
+        "native_width",
+        "native_height",
+        "sampler",
+        "scheduler",
+        "steps",
+        "cfg",
+        "prompt_format",
+        "evidence_note"
+      ],
+      "properties": {
+        "family": {"$ref": "#/$defs/token"},
+        "profile_path": {"$ref": "#/$defs/relativePath"},
+        "profile_id": {"$ref": "#/$defs/token"},
+        "profile_version": {"type": "string", "pattern": "^v[0-9]{3}$"},
+        "profile_sha256": {"$ref": "#/$defs/sha256"},
+        "workflow_path": {"$ref": "#/$defs/relativePath"},
+        "workflow_sha256": {"$ref": "#/$defs/sha256"},
+        "native_width": {"type": "integer", "minimum": 1},
+        "native_height": {"type": "integer", "minimum": 1},
+        "sampler": {"$ref": "#/$defs/token"},
+        "scheduler": {"$ref": "#/$defs/token"},
+        "steps": {"type": "integer", "minimum": 1},
+        "cfg": {"type": "number", "exclusiveMinimum": 0},
+        "prompt_format": {"type": "string", "minLength": 1},
+        "evidence_note": {"type": "string", "minLength": 1}
+      }
+    },
+    "promptCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "role_scope",
+        "positive_contract",
+        "negative_contract",
+        "crop",
+        "pose",
+        "expression"
+      ],
+      "properties": {
+        "id": {"enum": [
+          "front-full-body-neutral",
+          "three-quarter-readable-hands",
+          "expressive-face-close-up",
+          "seated-or-asymmetric-pose",
+          "clothing-detail-stress",
+          "two-character-secondary-stress"
+        ]},
+        "role_scope": {"enum": ["single-role", "two-character-secondary"]},
+        "positive_contract": {"type": "string", "minLength": 1},
+        "negative_contract": {"type": "string", "minLength": 1},
+        "crop": {"$ref": "#/$defs/token"},
+        "pose": {"$ref": "#/$defs/token"},
+        "expression": {"$ref": "#/$defs/token"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"id": {"const": "two-character-secondary-stress"}}, "required": ["id"]},
+          "then": {"properties": {"role_scope": {"const": "two-character-secondary"}}},
+          "else": {"properties": {"role_scope": {"const": "single-role"}}}
+        }
+      ]
+    }
+  }
+}
