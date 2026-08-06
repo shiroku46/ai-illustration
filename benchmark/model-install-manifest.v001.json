@@ -40,8 +40,9 @@
         "settings_basis": "official-model-card"
       },
       "workflow": {
-        "status": "human-export-required",
-        "expected_api_path": "local/benchmark-workflows/animagine-xl.api.json"
+        "status": "repository-template",
+        "path": "benchmark/workflows/animagine-xl.api.json",
+        "sha256": "e45b7f2c8acf4f1e5167025d722075d068664ba98611be2efa7740fb93a6cfaf"
       }
     },
     {
@@ -73,8 +74,9 @@
         "settings_basis": "project-benchmark-baseline"
       },
       "workflow": {
-        "status": "human-export-required",
-        "expected_api_path": "local/benchmark-workflows/illustrious-xl.api.json"
+        "status": "repository-template",
+        "path": "benchmark/workflows/illustrious-xl.api.json",
+        "sha256": "eaab0b4bf5577488d8b6ac472ecfadb7ca00352d45570b9ce5bb860a099f0e9b"
       }
     },
     {
@@ -121,13 +123,14 @@
         "steps": 40,
         "cfg": 4.5,
         "sampler": "er_sde",
-        "scheduler": "normal",
+        "scheduler": "simple",
         "prompt_format": "natural-language",
         "settings_basis": "official-model-card"
       },
       "workflow": {
-        "status": "human-export-required",
-        "expected_api_path": "local/benchmark-workflows/anima-aesthetic.api.json"
+        "status": "repository-template",
+        "path": "benchmark/workflows/anima-aesthetic.api.json",
+        "sha256": "bbb0ea8189fb7aba637117c7c1ea56dedb4a0510e9ab1932334d5b460335e248"
       }
     }
   ]
