@@ -1,0 +1,143 @@
+{
+  "kind": "model-benchmark-plan",
+  "schema_version": "1.0",
+  "id": "manzai-three-model-bakeoff",
+  "version": "v001",
+  "status": "prepared",
+  "art_direction": {
+    "profile_path": "art-direction/manzai-duo-test-art-direction.v001.json",
+    "profile_id": "manzai-duo-test-art-direction",
+    "profile_version": "v001",
+    "profile_sha256": "ba85bc9f2539731c1b40d37c29413f9b7dba0be2e9b2ea09b8bf40abe9745cf6",
+    "review_path": "art-direction/manzai-duo-test-art-direction.v001.owner-review.json",
+    "review_id": "art-review-cd2c8e7517a69f45",
+    "review_sha256": "cd659343fd3f82631bc118c224906ced8f771e894b80d4e5a1b1ba97ad17c20c"
+  },
+  "hardware": {
+    "path": "benchmark/hardware/owner-rtx4060-windows.v001.json",
+    "id": "owner-rtx4060-windows",
+    "sha256": "0f33cb4eb6604e725606d65eb8221cbb8c199e860e2515bf4cd002bd6028196d"
+  },
+  "models": [
+    {
+      "family": "animagine-xl",
+      "profile_path": "benchmark/model-profiles/animagine-xl-4-0-opt.v001.json",
+      "profile_id": "animagine-xl-4-0-opt",
+      "profile_version": "v001",
+      "profile_sha256": "c32fba061e9f3a88453b2a47c326d4a11ab4401a86b8e64cebb966a461895fbc",
+      "workflow_path": "benchmark/workflows/animagine-xl.api.json",
+      "workflow_sha256": "e45b7f2c8acf4f1e5167025d722075d068664ba98611be2efa7740fb93a6cfaf",
+      "native_width": 1024,
+      "native_height": 1024,
+      "sampler": "euler_ancestral",
+      "scheduler": "normal",
+      "steps": 28,
+      "cfg": 5.0,
+      "prompt_format": "tags",
+      "evidence_note": "Official Animagine XL 4.0 guidance for 1024 square, 25-28 steps, CFG 5, and Euler Ancestral; exact workflow is checksum-bound."
+    },
+    {
+      "family": "illustrious-xl",
+      "profile_path": "benchmark/model-profiles/illustrious-xl-v2-0-stable.v001.json",
+      "profile_id": "illustrious-xl-v2-0-stable",
+      "profile_version": "v001",
+      "profile_sha256": "8845c72c5e8fcb969836a7fdb4ed13e8f661cba92549e6047c4a6e59c83fd91e",
+      "workflow_path": "benchmark/workflows/illustrious-xl.api.json",
+      "workflow_sha256": "eaab0b4bf5577488d8b6ac472ecfadb7ca00352d45570b9ce5bb860a099f0e9b",
+      "native_width": 1024,
+      "native_height": 1024,
+      "sampler": "euler_ancestral",
+      "scheduler": "normal",
+      "steps": 28,
+      "cfg": 5.0,
+      "prompt_format": "hybrid",
+      "evidence_note": "Project comparison baseline at the same SDXL resolution, sampler, steps, and CFG as Animagine; not represented as official Illustrious guidance."
+    },
+    {
+      "family": "anima-aesthetic",
+      "profile_path": "benchmark/model-profiles/anima-aesthetic-v1-1.v001.json",
+      "profile_id": "anima-aesthetic-v1-1",
+      "profile_version": "v001",
+      "profile_sha256": "794642188f827fe4408ee471ae7728e2903984b2a1c8b6b6a805d8a36de5c359",
+      "workflow_path": "benchmark/workflows/anima-aesthetic.api.json",
+      "workflow_sha256": "bbb0ea8189fb7aba637117c7c1ea56dedb4a0510e9ab1932334d5b460335e248",
+      "native_width": 1024,
+      "native_height": 1024,
+      "sampler": "er_sde",
+      "scheduler": "simple",
+      "steps": 40,
+      "cfg": 4.5,
+      "prompt_format": "natural-language",
+      "evidence_note": "Official Anima Aesthetic ranges and native ComfyUI workflow structure; evaluation-only under the recorded model-use scope."
+    }
+  ],
+  "seeds": [
+    101,
+    202,
+    303,
+    404,
+    505,
+    606,
+    707,
+    808
+  ],
+  "prompt_cases": [
+    {
+      "id": "front-full-body-neutral",
+      "role_scope": "single-role",
+      "positive_contract": "Boke role only: hat-wearing short black bob, blue eyes, white shirt, brown necktie, dark suspenders, loose dark-brown trousers and black ankle boots; front-facing neutral full-body standing pose, complete silhouette, both hands readable, plain white or transparent-looking background, uneven hand-drawn contour, flat colors and no more than one simple shadow layer.",
+      "negative_contract": "No tsukkomi role, no extra person, no crop, no hidden feet, no malformed or fused hands or limbs, no broken joints or torso, no incoherent clothing, no generic mobile-game face, no photorealism, no 3D or 2.5D rendering, no over-rendered lighting, no architecture or busy background.",
+      "crop": "full-body",
+      "pose": "front-neutral",
+      "expression": "gentle-neutral"
+    },
+    {
+      "id": "three-quarter-readable-hands",
+      "role_scope": "single-role",
+      "positive_contract": "Tsukkomi role only: long brown ponytail with shell-like orange hair ornament, magenta eyes, vivid blue tailored jacket and trousers, white shirt, orange necktie and brown shoes; three-quarter standing pose with one open presenting hand and the other hand clearly visible, coherent suit construction, plain white background, simplified thin linework, flat colors and minimal shading.",
+      "negative_contract": "No boke role, no extra person, no hidden or fused fingers, no missing hands or limbs, no broken shoulders, elbows, hips, knees or ankles, no incoherent lapels or trousers, no generic mobile-game face, no photorealism, no 3D rendering, no over-rendered lighting, no props, architecture or busy background.",
+      "crop": "full-body",
+      "pose": "three-quarter-standing",
+      "expression": "confident-smile"
+    },
+    {
+      "id": "expressive-face-close-up",
+      "role_scope": "single-role",
+      "positive_contract": "Boke role close-up: preserve the short black bob, dark newsboy cap, blue eyes and gentle facial geometry while showing a clearly readable surprised-comedic expression; clean head-and-shoulders framing, uneven hand-drawn contour, flat colors and one simple shadow layer on a plain background.",
+      "negative_contract": "No tsukkomi role, no duplicate face, no asymmetrical or melted eyes, no broken mouth, no generic mobile-game face, no glossy 3D skin, no photorealism, no dramatic lighting, no complex background, no text or props.",
+      "crop": "face-close-up",
+      "pose": "head-shoulders",
+      "expression": "surprised-comedic"
+    },
+    {
+      "id": "seated-or-asymmetric-pose",
+      "role_scope": "single-role",
+      "positive_contract": "Tsukkomi role only: preserve the long brown ponytail, shell-like orange hair ornament, magenta eyes, blue suit and orange necktie in a readable asymmetric seated pose with torso, hips, knees, ankles and both hands clearly constructed; plain white background, simplified linework, flat colors and minimal shading.",
+      "negative_contract": "No boke role, no extra person, no cropped feet, no fused legs or hands, no broken pelvis, spine, knees or ankles, no incoherent jacket or trouser construction, no generic mobile-game face, no photorealism, no 3D rendering, no furniture detail beyond a simple neutral seat, no busy background.",
+      "crop": "full-body",
+      "pose": "asymmetric-seated",
+      "expression": "focused-reaction"
+    },
+    {
+      "id": "clothing-detail-stress",
+      "role_scope": "single-role",
+      "positive_contract": "Boke role only in a full-body standing view emphasizing coherent construction of the white collared shirt, brown necktie, separate dark suspenders with clips, high-waisted loose dark-brown trousers, cuffs and black ankle boots; preserve the dark cap, short black bob and blue eyes; plain background, uneven hand-drawn linework, flat colors and one simple shadow layer.",
+      "negative_contract": "No tsukkomi role, no merged tie and suspenders, no missing clips, no impossible seams, no fused sleeves or trousers, no malformed hands or feet, no generic mobile-game face, no photorealism, no 3D rendering, no over-rendered fabric or lighting, no props or architecture.",
+      "crop": "full-body",
+      "pose": "detail-standing",
+      "expression": "gentle-smile"
+    },
+    {
+      "id": "two-character-secondary-stress",
+      "role_scope": "two-character-secondary",
+      "positive_contract": "Both distinct comedy-duo roles together, full body and side by side on a plain white background: the shorter hat-wearing black-bob boke in white shirt, brown tie, suspenders and dark trousers, and the taller long-ponytail tsukkomi in vivid blue suit and orange tie; preserve separate silhouettes, readable hands, coherent clothing, shared simplified linework, flat colors and minimal shading, with a clear conversational gesture between them.",
+      "negative_contract": "No merged bodies, no duplicated role, no swapped hair or costume identity, no fused or missing hands or limbs, no broken joints or torso, no incoherent clothing, no generic matching mobile-game faces, no photorealism, no 3D or 2.5D rendering, no over-rendered lighting, no architecture, props or busy background.",
+      "crop": "full-body",
+      "pose": "duo-conversation",
+      "expression": "comedic-exchange"
+    }
+  ],
+  "output_root": "local/benchmark-output",
+  "selection_policy": "owner-only",
+  "notes": "This plan benchmarks three exact model families using identical seeds and six required cases. Anima Aesthetic is evaluation-only and cannot receive a production selected-model lock."
+}
