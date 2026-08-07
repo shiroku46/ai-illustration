@@ -141,10 +141,15 @@ class IdentityLockResultsTest(unittest.TestCase):
         self.assertEqual(len(self.results["results"]), 36)
 
     def test_exact_plan_binding_is_required(self) -> None:
-        for field in ("plan_ref", "plan_version", "plan_sha256"):
+        wrong_values = {
+            "plan_ref": "different-plan",
+            "plan_version": "v999",
+            "plan_sha256": SHA_A,
+        }
+        for field, value in wrong_values.items():
             with self.subTest(field=field):
                 results = copy.deepcopy(self.results)
-                results[field] = SHA_A if field == "plan_sha256" else "wrong"
+                results[field] = value
                 self.assertIn("PLAN_BINDING", {item["code"] for item in self.validate(results)[0]})
 
     def test_matrix_coverage_rejects_missing_extra_and_duplicate_runs(self) -> None:
@@ -248,10 +253,11 @@ class IdentityLockResultsTest(unittest.TestCase):
         self.assertEqual(manifest["expression_order"], sorted(self.plan["expression_targets"]))
         self.assertEqual(manifest["decision_policy"], "owner-only")
         sheet = next(payload.decode("utf-8") for path, payload in files.items() if path.endswith(".svg"))
-        self.assertIn("data:image/png;base64,", "\n".join(payload.decode("utf-8") for path, payload in files.items() if path.endswith(".svg")))
+        all_sheets = "\n".join(payload.decode("utf-8") for path, payload in files.items() if path.endswith(".svg"))
+        self.assertIn("data:image/png;base64,", all_sheets)
         self.assertIn("EXECUTION FAILED", sheet)
         for prohibited in ("<script", "https://", "href=\"http", "xlink:href", "@import", "<foreignObject"):
-            self.assertNotIn(prohibited, "\n".join(payload.decode("utf-8") for path, payload in files.items() if path.endswith(".svg")))
+            self.assertNotIn(prohibited, all_sheets)
 
     def test_sheet_package_is_byte_deterministic(self) -> None:
         first_manifest, first_files = ir.build_sheet_package(self.results, self.plan, {})
