@@ -23,13 +23,13 @@ $specifications = @(
     [ordered]@{
         role = "boke"
         source = $BokePath
-        filename = "楽子.png"
+        filename = "boke-rakuko.png"
         sha256 = "5d5d67ecca13eebfb762b8251ea0bb00481951d79dcd46c9e44986fc2d069e69"
     },
     [ordered]@{
         role = "tsukkomi"
         source = $TsukkomiPath
-        filename = "櫻.png"
+        filename = "tsukkomi-sakura.png"
         sha256 = "474465adea571e35a1c722fe96e910f75bdf919f43927cb2ba366186ea672303"
     }
 )

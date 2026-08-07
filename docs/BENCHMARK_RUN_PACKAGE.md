@@ -37,14 +37,14 @@ powershell -ExecutionPolicy Bypass -File .\tools\prepare-art-references.ps1 `
   -Execute
 ```
 
-Default destination:
+The source filenames may be arbitrary. The helper always writes the exact filenames bound by the approved art-direction profile:
 
 ```text
-local/art-references/楽子.png
-local/art-references/櫻.png
+local/art-references/boke-rakuko.png
+local/art-references/tsukkomi-sakura.png
 ```
 
-The helper verifies the exact approved SHA-256 values before any copy, uses a temporary file, and never overwrites different bytes.
+The helper verifies the exact approved SHA-256 values before any copy, uses a temporary file, and never overwrites different bytes. The benchmark validator later resolves these exact profile-bound paths, so renaming either prepared file is not permitted.
 
 ## Prepare the deterministic run package
 
@@ -100,4 +100,4 @@ The existing benchmark-plan schema uses stable lowercase hyphenated setting alia
 
 ## Remaining execution boundary
 
-After the run package is prepared, the local model installation and non-generating readiness checks in `docs/MODEL_INSTALL_MANIFEST.md` and `docs/BENCHMARK_READINESS.md` must pass. Actual 144-run execution is a separate effectful stage and may not begin from a failed or stale readiness result.
+After the run package is prepared, the local model installation and non-generating readiness checks in `docs/MODEL_INSTALL_MANIFEST.md` and `docs/BENCHMARK_READINESS.md` must pass. Actual 144-run execution is performed by `ai_illustration.benchmark_execute` and remains blocked by failed or stale readiness.
