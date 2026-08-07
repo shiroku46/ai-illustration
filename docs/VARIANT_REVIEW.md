@@ -80,6 +80,10 @@ All five options are all-or-none. Evaluation review rejects production identity 
 
 The review checker performs no image generation or repair, no filesystem mutation, no model/control/LoRA installation or training, no ComfyUI/provider/network call, and no automatic aesthetic or identity scoring/ranking/selection.
 
-## Next boundary
+## Production export boundary
 
-This document format is the canonical owner-review evidence for future variant export integration. The existing exporter must not treat an older, less-bound review as equivalent to this contract once that integration unit is completed.
+The production exporter now consumes this formal review format directly. It does not accept or silently upgrade the older seven-field per-variant approval shape.
+
+Every production export revalidates the exact identity-aware variant set first, then requires one formal review per PNG with the exact canonical variant-set SHA-256, source candidate/request/SHA, owner-approved identity review and strategy, accepted identity-evidence run IDs, selected model family/profile/workflow hashes, exact PNG SHA-256, `decision=accept`, `result_state=production-variant-approved`, and an empty hard-fail list.
+
+The deterministic export package preserves `variant_set_sha256` and the complete identity projection. Evaluation packages preserve only the explicit `identity_gate=evaluation-unlocked` projection with null/empty identity fields and contain no production review claims. Offline package checking revalidates the embedded formal review ID/schema and cross-checks every source, identity, model, and PNG binding without network access.
