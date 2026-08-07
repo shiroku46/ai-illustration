@@ -61,4 +61,22 @@ python -m ai_illustration.identity_lock_review review-check REVIEW.json PLAN.jso
 
 The command performs no generation, network access, ComfyUI/provider call, model/control/LoRA installation or training, browser/server launch, or filesystem mutation.
 
-A successful explicit approval returns exact `boke` and `tsukkomi` identity locks. Those locks are the future authorization boundary for controlled production variants.
+A successful explicit approval returns exact `boke` and `tsukkomi` identity locks. Those locks are the authorization boundary for controlled production variants.
+
+## Production variant boundary
+
+A clean creative-candidate review remains necessary for every variant plan, but it is no longer sufficient for `intent=production`.
+
+Production variant planning, canonical revalidation, and export must be supplied the exact same five identity-evidence inputs:
+
+- owner identity-lock review;
+- identity-lock plan;
+- identity-lock results;
+- live identity result root;
+- deterministic consistency-sheet package root.
+
+The gate is re-run at each production boundary. The role lock returned by the owner review must bind the exact source candidate ID, generation-request ID, and candidate PNG SHA-256. Its approved model profile ID must also match the source generation request's model ID. Stale evidence, changed sheets, a different candidate, a different model, or a non-approval decision closes the gate.
+
+A production variant set records `identity_gate=owner-approved`, the exact review reference/checksum, selected strategy, accepted identity-evidence runs, and selected model family/profile/workflow hashes. These fields participate in deterministic variant identity so an unlocked evaluation plan cannot collide with a production plan.
+
+Evaluation variant planning remains available after clean creative approval for non-production experimentation. It records `identity_gate=evaluation-unlocked` and carries no review, strategy, run, or production-model lock. Supplying production identity evidence to an evaluation command is rejected rather than silently ignored.
