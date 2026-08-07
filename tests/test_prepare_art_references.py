@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "prepare-art-references.ps1"
+PROFILE = ROOT / "art-direction" / "manzai-duo-test-art-direction.v001.json"
 
 
 class PrepareArtReferencesTest(unittest.TestCase):
-    def test_script_pins_exact_owner_reference_hashes_and_names(self) -> None:
+    def test_script_pins_exact_owner_reference_hashes_and_profile_names(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("楽子.png", source)
-        self.assertIn("櫻.png", source)
+        profile = json.loads(PROFILE.read_text(encoding="utf-8"))
+        paths = {item["role"]: item["path"] for item in profile["visual_references"]}
+        self.assertEqual("boke-rakuko.png", paths["boke"])
+        self.assertEqual("tsukkomi-sakura.png", paths["tsukkomi"])
+        self.assertIn(f'filename = "{paths["boke"]}"', source)
+        self.assertIn(f'filename = "{paths["tsukkomi"]}"', source)
         self.assertIn(
             "5d5d67ecca13eebfb762b8251ea0bb00481951d79dcd46c9e44986fc2d069e69",
             source,
