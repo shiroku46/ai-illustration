@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
+import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,11 +67,40 @@ class BenchmarkOperatorTest(unittest.TestCase):
 
     def test_endpoint_is_explicit_loopback_and_comfyui_is_never_auto_started(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
-        self.assertIn('http://127.0.0.1:8188', source)
+        self.assertIn("http://127.0.0.1:8188", source)
         self.assertIn("Endpoint must use an explicit HTTP loopback host", source)
         self.assertNotIn("ComfyUI.exe", source)
         self.assertNotIn("main.py --listen", source)
         self.assertNotIn("Get-Process", source)
+
+    @unittest.skipUnless(os.name == "nt", "Windows PowerShell contract")
+    def test_default_operator_mode_executes_without_side_effect_inputs(self) -> None:
+        local_root = ROOT / "local"
+        self.assertFalse(local_root.exists())
+        completed = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(SCRIPT),
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        payload = json.loads(completed.stdout.strip())
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["effect_requests"]["prepare"])
+        self.assertFalse(payload["effect_requests"]["install_models"])
+        self.assertFalse(payload["effect_requests"]["execute_benchmark"])
+        self.assertFalse(payload["effect_requests"]["finalize"])
+        self.assertFalse(payload["automatic_selection"])
+        self.assertFalse(local_root.exists())
 
 
 if __name__ == "__main__":
