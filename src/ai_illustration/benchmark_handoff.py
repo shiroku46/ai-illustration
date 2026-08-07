@@ -19,7 +19,7 @@ WINDOWS_PATH_RE = re.compile(r"(?i)\b[a-z]:\\[^\s\"']+")
 QUOTED_POSIX_PATH_RE = re.compile(r"([\"'])/(?:[^\r\n]*?)\1")
 POSIX_PATH_RE = re.compile(r"(?<![:A-Za-z0-9_])/(?:[^\s\"']*)")
 SECRET_VALUE_RE = re.compile(
-    r"(?i)(?:bearer\s+[A-Za-z0-9._~+/=-]{8,}|(?:sk|ghp|github_pat)_[A-Za-z0-9_-]{8,})"
+    r"(?i)(?:bearer\s+[A-Za-z0-9._~+/=-]{8,}|sk-[A-Za-z0-9_-]{8,}|(?:ghp|github_pat)_[A-Za-z0-9_-]{8,})"
 )
 
 
