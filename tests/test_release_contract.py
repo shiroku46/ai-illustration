@@ -20,10 +20,10 @@ class RepositoryReleaseContractTests(unittest.TestCase):
         self.assertEqual(result["release"]["version"], RELEASE_VERSION)
         self.assertEqual(
             result["release"]["id"],
-            "ai-illustration-mvp-release-8e1c557c117b354332ec",
+            "ai-illustration-mvp-release-b3c88c08d4903d4502fe",
         )
         self.assertEqual(result["critical_file_count"], len(result["critical_files"]))
-        self.assertGreaterEqual(result["critical_file_count"], 46)
+        self.assertGreaterEqual(result["critical_file_count"], 83)
         self.assertEqual(
             [item["path"] for item in result["critical_files"]],
             sorted(item["path"] for item in result["critical_files"]),
