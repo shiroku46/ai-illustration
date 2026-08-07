@@ -314,7 +314,7 @@ class AssetPrepTests(unittest.TestCase):
                 fit_pixels[y * 6 + x] = (1, 2, 3, 255)
         self._rewrite_source(_rgba_png(6, 6, fit_pixels))
         self.profile = self._profile()
-        self.profile["roles"][0]["target_anchor_x"] = 0
+        self.profile["roles"][0]["target_anchor_x"] = 9
         self._rewrite_profile()
         with self._checked():
             with self.assertRaisesRegex(ap.AssetPrepError, "CROP_FIT"):
