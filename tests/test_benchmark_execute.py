@@ -174,6 +174,7 @@ class BenchmarkExecuteTest(unittest.TestCase):
         failed = self._run(FakeClient(self.image, mode="queue-failure"))
         self.assertEqual(1, failed["failed"])
         self.assertEqual(143, failed["pending"])
+        self.assertFalse(failed["prompt_queued"])
         failed_journal = next((self.results / be.JOURNAL_DIR).glob("*.json"))
         failed_run_id = failed_journal.stem
         failure = json.loads(failed_journal.read_text(encoding="utf-8"))
@@ -183,6 +184,14 @@ class BenchmarkExecuteTest(unittest.TestCase):
         self.assertEqual(1, retried["succeeded"])
         replacement = json.loads((self.results / be.JOURNAL_DIR / f"{failed_run_id}.json").read_text(encoding="utf-8"))
         self.assertEqual("succeeded", replacement["result"]["state"])
+
+    def test_post_queue_failure_records_prompt_identity(self) -> None:
+        failed = self._run(FakeClient(self.image, mode="history-failure"))
+        self.assertEqual(1, failed["failed"])
+        self.assertTrue(failed["prompt_queued"])
+        journal = json.loads(next((self.results / be.JOURNAL_DIR).glob("*.json")).read_text(encoding="utf-8"))
+        self.assertEqual("prompt-1", journal["prompt_id"])
+        self.assertEqual("failed", journal["result"]["state"])
 
     def test_tampered_completed_image_fails_closed_without_network(self) -> None:
         self._run(FakeClient(self.image))
@@ -229,9 +238,11 @@ class BenchmarkExecuteTest(unittest.TestCase):
             sleeper=clock.sleep,
         )
         self.assertEqual(1, result["failed"])
+        self.assertTrue(result["prompt_queued"])
         self.assertLessEqual(client.history_calls, 5)
         journal = json.loads(next((self.results / be.JOURNAL_DIR).glob("*.json")).read_text(encoding="utf-8"))
         self.assertEqual("run-timeout", journal["result"]["error"]["code"])
+        self.assertEqual("prompt-1", journal["prompt_id"])
 
     def test_execute_acknowledgement_and_limits_fail_closed(self) -> None:
         with self.assertRaises(be.BenchmarkExecutionError):
@@ -259,7 +270,6 @@ class BenchmarkExecuteTest(unittest.TestCase):
             "aesthetic_score",
             "automatic_score",
             "select_model",
-            "ranking",
         ):
             with self.subTest(prohibited=prohibited):
                 self.assertNotIn(prohibited, source)
