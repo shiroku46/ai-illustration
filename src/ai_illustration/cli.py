@@ -19,12 +19,46 @@ from .preview import PreviewError, build_preview_package, check_preview_package
 from .render_plan import RenderPlanError, build_render_plan_package, check_render_plan_package
 from .review_ui import ReviewUIError, run_review_ui
 from .validation import validate_path
-from .variants import VariantError, check_variant_set, load_json_object as load_variant_json, plan_variant_set
+from .variants import IdentityEvidence, VariantError, check_variant_set, load_json_object as load_variant_json, plan_variant_set
 
 
 def _root_args(parser: argparse.ArgumentParser, *names: str) -> None:
     for name in names:
         parser.add_argument(f"--{name.replace('_', '-')}", dest=name, type=Path, required=True)
+
+
+def _identity_evidence_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--identity-review", type=Path)
+    parser.add_argument("--identity-plan", type=Path)
+    parser.add_argument("--identity-results", type=Path)
+    parser.add_argument("--identity-result-root", type=Path)
+    parser.add_argument("--identity-package-root", type=Path)
+
+
+def _identity_evidence(args: argparse.Namespace) -> IdentityEvidence | None:
+    names = (
+        "identity_review",
+        "identity_plan",
+        "identity_results",
+        "identity_result_root",
+        "identity_package_root",
+    )
+    values = [getattr(args, name, None) for name in names]
+    if not any(value is not None for value in values):
+        return None
+    if not all(value is not None for value in values):
+        raise VariantError(
+            "IDENTITY_EVIDENCE_ARGS",
+            "all five identity evidence options must be supplied together",
+            "identity_evidence",
+        )
+    return IdentityEvidence(
+        review=args.identity_review,
+        plan=args.identity_plan,
+        results=args.identity_results,
+        result_root=args.identity_result_root,
+        package_root=args.identity_package_root,
+    )
 
 
 def _adapter_execution_args(parser: argparse.ArgumentParser, *, include_manifest: bool = False) -> None:
@@ -76,14 +110,17 @@ def build_parser() -> argparse.ArgumentParser:
     variant_plan.add_argument("--source-candidate", required=True)
     variant_plan.add_argument("--matrix", type=Path, required=True)
     variant_plan.add_argument("--intent", choices=("evaluation", "production"), required=True)
+    _identity_evidence_args(variant_plan)
     variant_check = commands.add_parser("variant-check")
     variant_check.add_argument("variant_set", type=Path)
     _root_args(variant_check, "manifest_root")
+    _identity_evidence_args(variant_check)
 
     export = commands.add_parser("variant-export")
     export.add_argument("variant_set", type=Path)
     _root_args(export, "manifest_root", "source_root", "output_root")
     export.add_argument("--approval-root", type=Path)
+    _identity_evidence_args(export)
     export.add_argument("--write", action="store_true")
     export_check = commands.add_parser("export-check")
     export_check.add_argument("package_manifest", type=Path)
@@ -169,11 +206,35 @@ def main(argv: list[str] | None = None) -> int:
             return _emit({"ok": not diagnostics, "diagnostic_count": len(diagnostics), "diagnostics": [item.to_dict() for item in diagnostics]}, "validation succeeded" if not diagnostics else f"validation failed with {len(diagnostics)} diagnostic(s)", not diagnostics)
 
         if command in {"variant-plan", "variant-check"}:
-            plan = plan_variant_set(args.manifest_root, args.source_candidate, load_variant_json(args.matrix), args.intent) if command == "variant-plan" else check_variant_set(args.variant_set, args.manifest_root)
+            identity = _identity_evidence(args)
+            plan = (
+                plan_variant_set(
+                    args.manifest_root,
+                    args.source_candidate,
+                    load_variant_json(args.matrix),
+                    args.intent,
+                    identity_evidence=identity,
+                )
+                if command == "variant-plan"
+                else check_variant_set(
+                    args.variant_set,
+                    args.manifest_root,
+                    identity_evidence=identity,
+                )
+            )
             return _emit({"ok": True, "variant_set": plan}, f"validated {len(plan['variants'])} reviewed variant(s)", True)
 
         if command == "variant-export":
-            result = build_export_package(args.variant_set, args.manifest_root, args.source_root, args.output_root, approval_root=args.approval_root, write=args.write)
+            identity = _identity_evidence(args)
+            result = build_export_package(
+                args.variant_set,
+                args.manifest_root,
+                args.source_root,
+                args.output_root,
+                approval_root=args.approval_root,
+                identity_evidence=identity,
+                write=args.write,
+            )
             return _emit(result, f"{'materialized' if args.write else 'planned'} {len(result['package']['items'])} verified variant export(s)", True)
         if command == "export-check":
             result = check_export_package(args.package_manifest, args.output_root)

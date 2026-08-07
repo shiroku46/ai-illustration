@@ -12,10 +12,13 @@ import unittest
 from unittest.mock import patch
 import zlib
 
+from ai_illustration import identity_lock as il
+from ai_illustration import identity_lock_results as ir
+from ai_illustration import identity_lock_review as rv
 from ai_illustration.exporter import ExportError, build_export_package, check_export_package
 from ai_illustration.naming import canonical_json, content_identifier
 from ai_illustration.quality import CREATIVE_CANDIDATE, TECHNICAL_CANDIDATE
-from ai_illustration.variants import plan_variant_set
+from ai_illustration.variants import IdentityEvidence, VariantError, plan_variant_set
 
 
 def _write_json(path: Path, data: dict[str, object]) -> None:
@@ -73,6 +76,7 @@ class ExporterTests(unittest.TestCase):
 
         candidate_payload = _png((0, 0, 0, 0))
         candidate_sha = hashlib.sha256(candidate_payload).hexdigest()
+        self.candidate_sha = candidate_sha
         (self.manifests / "candidate.png").write_bytes(candidate_payload)
         _write_json(self.manifests / "character.json", {
             "kind": "character-spec", "schema_version": "1.0", "id": "boke",
@@ -114,10 +118,11 @@ class ExporterTests(unittest.TestCase):
                 {"expression": "neutral", "pose": "listening", "facing": "front", "crop": "full", "mouth_state": "closed"},
             ]
         }
+        self.identity_evidence = self._build_identity_evidence()
         self.variant_set = plan_variant_set(self.manifests, "candidate-demo", self.matrix, "evaluation")
         self.variant_set_path = self.root / "variant-set.json"
         _write_json(self.variant_set_path, self.variant_set)
-        self._restore_sources()
+        self._restore_sources_for(self.variant_set)
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -129,11 +134,101 @@ class ExporterTests(unittest.TestCase):
             else:
                 child.unlink()
 
-    def _restore_sources(self) -> None:
+    def _restore_sources_for(self, variant_set: dict[str, object]) -> None:
         self._clear(self.sources)
-        for variant in self.variant_set["variants"]:
+        for variant in variant_set["variants"]:
             pixel = (255, 0, 0, 255) if variant["expression"] == "neutral" else (0, 0, 255, 255)
             (self.sources / f"{variant['id']}.png").write_bytes(_png(pixel))
+
+    def _restore_sources(self) -> None:
+        self._restore_sources_for(self.variant_set)
+
+    def _build_identity_evidence(self) -> IdentityEvidence:
+        identity_root = self.root / "identity-evidence"
+        result_root = identity_root / "results"
+        result_root.mkdir(parents=True)
+        poses = ["front-neutral", "three-quarter", "seated-asymmetric"]
+        plan = {
+            "kind": "identity-lock-plan", "schema_version": "1.0",
+            "id": "export-source-identity-lock", "version": "v001", "status": "prepared",
+            "selected_model": {
+                "family": "fixture-family", "profile_ref": "fixture-model@v001",
+                "profile_sha256": "a" * 64, "workflow_sha256": "b" * 64,
+                "benchmark_review_ref": "benchmark-review-fixture",
+                "benchmark_review_sha256": "c" * 64, "production_eligible": True,
+            },
+            "roles": [
+                {"role": "boke", "candidate_id": "candidate-demo", "request_id": "request-demo", "image_sha256": self.candidate_sha, "reference_path": "identities/boke.png"},
+                {"role": "tsukkomi", "candidate_id": "candidate-tsukkomi", "request_id": "request-tsukkomi", "image_sha256": "d" * 64, "reference_path": "identities/tsukkomi.png"},
+            ],
+            "pose_targets": poses,
+            "expression_targets": ["neutral", "smile", "surprised"],
+            "strategies": [
+                {"id": "reference-baseline", "type": "reference-only"},
+                {"id": "reference-openpose", "type": "reference-plus-pose", "control_method": "openpose", "control_assets": [
+                    {"pose": pose, "path": f"controls/{pose}.png", "sha256": "e" * 64} for pose in poses
+                ]},
+            ],
+        }
+        identity_png = _png((10, 20, 30, 255))
+        identity_png_sha = hashlib.sha256(identity_png).hexdigest()
+        entries: list[dict[str, object]] = []
+        for row in il.expand_matrix(plan):
+            common = {key: row[key] for key in (
+                "run_id", "model_family", "model_profile_ref", "model_profile_sha256",
+                "workflow_sha256", "role", "candidate_id", "request_id", "identity_sha256",
+                "strategy_id", "strategy_type", "pose", "expression", "control_sha256",
+            )}
+            if row["strategy_id"] == "reference-baseline":
+                path = result_root / row["output_path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(identity_png)
+                entries.append({**common, "state": "succeeded", "elapsed_ms": 100, "image_path": row["output_path"], "image_sha256": identity_png_sha, "width": 1, "height": 1})
+            else:
+                entries.append({**common, "state": "failed", "elapsed_ms": 100, "error": {"code": "fixture-failure", "message": "fixture control failure"}})
+        results = {
+            "kind": "identity-lock-results", "schema_version": "1.0",
+            "id": "export-identity-results", "version": "v001",
+            "plan_ref": plan["id"], "plan_version": plan["version"],
+            "plan_sha256": il.plan_sha256(plan), "results": entries,
+        }
+        diagnostics, images = ir.validate_results(results, plan, result_root)
+        self.assertEqual(diagnostics, [])
+        manifest, files = ir.build_sheet_package(results, plan, images)
+        package_root = identity_root / "package"
+        ir.publish_package(package_root, files)
+        role_map = {item["role"]: item for item in plan["roles"]}
+        model = plan["selected_model"]
+        matrix = il.expand_matrix(plan)
+        selections = []
+        for role in ("boke", "tsukkomi"):
+            identity = role_map[role]
+            selections.append({
+                "role": role, "strategy_id": "reference-baseline",
+                "candidate_id": identity["candidate_id"], "request_id": identity["request_id"],
+                "identity_sha256": identity["image_sha256"], "model_family": model["family"],
+                "model_profile_ref": model["profile_ref"], "model_profile_sha256": model["profile_sha256"],
+                "workflow_sha256": model["workflow_sha256"],
+                "accepted_run_ids": sorted(row["run_id"] for row in matrix if row["role"] == role and row["strategy_id"] == "reference-baseline"),
+            })
+        review = {
+            "kind": "identity-lock-review", "schema_version": "1.0",
+            "id": "identity-review-0000000000000000",
+            "plan_ref": plan["id"], "plan_version": plan["version"], "plan_sha256": il.plan_sha256(plan),
+            "results_ref": results["id"], "results_version": results["version"], "results_sha256": ir.results_sha256(results),
+            "package_ref": manifest["id"], "package_sha256": hashlib.sha256(ir.document_bytes(manifest)).hexdigest(),
+            "reviewer": "owner", "timestamp": "2026-08-07T07:00:00Z", "decision": "approve_identity_lock",
+            "role_selections": selections, "rejected_evidence": [],
+            "observations": ["fixture identity lock is complete"],
+        }
+        review["id"] = rv.expected_review_id(review)
+        plan_path = identity_root / "plan.json"
+        results_path = identity_root / "results.json"
+        review_path = identity_root / "review.json"
+        _write_json(plan_path, plan)
+        _write_json(results_path, results)
+        _write_json(review_path, review)
+        return IdentityEvidence(review=review_path, plan=plan_path, results=results_path, result_root=result_root, package_root=package_root)
 
     def _build(
         self,
@@ -143,19 +238,29 @@ class ExporterTests(unittest.TestCase):
         variant_set_path: Path | None = None,
         approval_root: Path | None = None,
     ) -> dict[str, object]:
+        path = variant_set_path or self.variant_set_path
+        identity = self.identity_evidence if path != self.variant_set_path else None
         return build_export_package(
-            variant_set_path or self.variant_set_path,
+            path,
             self.manifests,
             self.sources,
             output or self.output,
             approval_root=approval_root,
+            identity_evidence=identity,
             write=write,
         )
 
     def _production_variant_set(self) -> tuple[dict[str, object], Path]:
-        production = plan_variant_set(self.manifests, "candidate-demo", self.matrix, "production")
+        production = plan_variant_set(
+            self.manifests,
+            "candidate-demo",
+            self.matrix,
+            "production",
+            identity_evidence=self.identity_evidence,
+        )
         path = self.root / "variant-set-production.json"
         _write_json(path, production)
+        self._restore_sources_for(production)
         return production, path
 
     def _write_approvals(self, variant_set: dict[str, object]) -> None:
@@ -201,6 +306,19 @@ class ExporterTests(unittest.TestCase):
         repeated = self._build(write=True)
         self.assertTrue(repeated["idempotent"])
         self.assertFalse(repeated["published"])
+
+    def test_production_export_revalidates_identity_evidence(self) -> None:
+        production, production_path = self._production_variant_set()
+        self._write_approvals(production)
+        with self.assertRaisesRegex(VariantError, "IDENTITY_LOCK_REQUIRED"):
+            build_export_package(
+                production_path,
+                self.manifests,
+                self.sources,
+                self.root / "missing-identity-output",
+                approval_root=self.approvals,
+                write=False,
+            )
 
     def test_production_requires_included_exact_byte_bound_accept_reviews(self) -> None:
         production, production_path = self._production_variant_set()
