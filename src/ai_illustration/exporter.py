@@ -14,7 +14,7 @@ from typing import Any
 
 from .naming import SHA256_RE, TOKEN_RE, canonical_json, content_identifier, safe_relative_path
 from .validation import _parse_png
-from .variants import check_variant_set
+from .variants import IdentityEvidence, check_variant_set
 
 PACKAGE_MANIFEST = "package-manifest.json"
 PAPER_THEATER_INDEX = "paper-theater-index.json"
@@ -463,9 +463,14 @@ def build_export_package(
     output_root: Path,
     *,
     approval_root: Path | None = None,
+    identity_evidence: IdentityEvidence | None = None,
     write: bool = False,
 ) -> dict[str, Any]:
-    variant_set = check_variant_set(variant_set_path, manifest_root)
+    variant_set = check_variant_set(
+        variant_set_path,
+        manifest_root,
+        identity_evidence=identity_evidence,
+    )
     manifests = _resolved_directory(manifest_root, must_exist=True, field="manifest_root")
     source = _resolved_directory(source_root, must_exist=True, field="source_root")
     output = _resolved_directory(output_root, must_exist=False, field="output_root")
