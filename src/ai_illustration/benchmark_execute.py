@@ -20,11 +20,7 @@ from .adapters.comfyui_http import ComfyUIHttpClient, HttpLimits
 from .adapters.comfyui_png import decode_comfyui_png
 from .benchmark_readiness import run_runtime_preflight
 from .benchmark_results import validate_document as validate_results_document
-from .benchmark_run_package import (
-    PACKAGE_MANIFEST,
-    build_package,
-    validate_package,
-)
+from .benchmark_run_package import PACKAGE_MANIFEST, build_package, validate_package
 from .model_benchmark import canonical_sha256
 from .model_install_manifest import load_manifest
 from .naming import canonical_json, safe_relative_path
@@ -56,6 +52,25 @@ class BenchmarkExecutionError(ValueError):
 
     def to_dict(self) -> dict[str, str]:
         return {"code": self.code, "message": self.message, "field": self.field}
+
+
+class _TrackingClient:
+    """Record whether ComfyUI accepted at least one prompt without changing client behavior."""
+
+    def __init__(self, inner: Any) -> None:
+        self.inner = inner
+        self.prompt_queued = False
+
+    def queue_prompt(self, workflow: dict[str, Any], *, timeout_seconds: float | None = None) -> str:
+        prompt_id = self.inner.queue_prompt(workflow, timeout_seconds=timeout_seconds)
+        self.prompt_queued = True
+        return prompt_id
+
+    def history(self, prompt_id: str, *, timeout_seconds: float | None = None) -> dict[str, Any]:
+        return self.inner.history(prompt_id, timeout_seconds=timeout_seconds)
+
+    def image(self, filename: str, subfolder: str, *, timeout_seconds: float | None = None) -> bytes:
+        return self.inner.image(filename, subfolder, timeout_seconds=timeout_seconds)
 
 
 def _diag(code: str, message: str, field: str = "") -> dict[str, str]:
@@ -100,9 +115,13 @@ def _load_json(path: Path, field: str, maximum: int = MAX_JSON_BYTES) -> dict[st
     return value
 
 
-def _resolve_directory(path: Path, field: str, *, create: bool = False) -> Path:
+def _lexical(path: Path) -> Path:
     expanded = path.expanduser()
-    lexical = expanded if expanded.is_absolute() else Path.cwd() / expanded
+    return expanded if expanded.is_absolute() else Path.cwd() / expanded
+
+
+def _resolve_directory(path: Path, field: str, *, create: bool = False) -> Path:
+    lexical = _lexical(path)
     if lexical.is_symlink():
         raise BenchmarkExecutionError("root-symlink", "directory must not be a symlink", field)
     if create and not lexical.exists():
@@ -114,6 +133,17 @@ def _resolve_directory(path: Path, field: str, *, create: bool = False) -> Path:
     if not resolved.is_dir() or resolved.is_symlink():
         raise BenchmarkExecutionError("root-type", "must be a regular directory", field)
     return resolved
+
+
+def _existing_directory(path: Path, field: str) -> Path | None:
+    """Resolve an existing directory without creating any filesystem entry."""
+
+    lexical = _lexical(path)
+    if lexical.is_symlink():
+        raise BenchmarkExecutionError("root-symlink", "directory must not be a symlink", field)
+    if not lexical.exists():
+        return None
+    return _resolve_directory(path, field)
 
 
 def _has_symlink(path: Path, stop: Path) -> bool:
@@ -155,17 +185,16 @@ def _atomic_write(path: Path, payload: bytes, *, replace: bool) -> None:
             return
         raise BenchmarkExecutionError("write-conflict", "refusing to overwrite different bytes", str(path))
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=parent)
+    temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        temporary = Path(temporary_name)
         if temporary.is_symlink() or not temporary.is_file():
             raise BenchmarkExecutionError("write-temp", "temporary output is invalid", str(temporary))
         os.replace(temporary, path)
     finally:
-        temporary = Path(temporary_name)
         if temporary.exists() and not temporary.is_symlink():
             temporary.unlink()
 
@@ -174,18 +203,14 @@ def _safe_error_code(value: Any) -> str:
     raw = str(value or "execution-error").strip().lower().replace("_", "-")
     raw = re.sub(r"[^a-z0-9-]+", "-", raw).strip("-")
     raw = re.sub(r"-+", "-", raw)
-    if not raw:
-        raw = "execution-error"
-    if not ERROR_CODE_RE.fullmatch(raw):
+    if not raw or not ERROR_CODE_RE.fullmatch(raw):
         raw = "execution-error"
     return raw[:120].rstrip("-") or "execution-error"
 
 
 def _safe_error_message(value: Any) -> str:
     text = " ".join(str(value or "execution failed").replace("\x00", " ").split())
-    if not text:
-        text = "execution failed"
-    return text[:MAX_ERROR_CHARS]
+    return (text or "execution failed")[:MAX_ERROR_CHARS]
 
 
 def _prompt_id(value: Any) -> str:
@@ -224,7 +249,11 @@ def _package_context(
 ) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any], str]:
     workspace = _resolve_directory(workspace_root, "workspace_root")
     package = _resolve_directory(package_root, "package_root")
-    plan = _load_json(plan_path.resolve(strict=True), "plan")
+    try:
+        resolved_plan = plan_path.expanduser().resolve(strict=True)
+    except OSError as exc:
+        raise BenchmarkExecutionError("plan-read", str(exc), "plan") from exc
+    plan = _load_json(resolved_plan, "plan")
     try:
         install = load_manifest(install_manifest_path)
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
@@ -266,7 +295,7 @@ def _results_document(
         "plan_version": plan["version"],
         "plan_sha256": canonical_sha256(plan),
         "results": entries,
-        "notes": "Local deterministic benchmark execution journal; no aesthetic ranking or automatic selection.",
+        "notes": "Local deterministic benchmark execution journal; no aesthetic scoring or automatic selection.",
     }
     diagnostics = validate_results_document(document)
     if diagnostics:
@@ -348,8 +377,7 @@ def _verify_journal(
     result = journal.get("result")
     if not isinstance(result, dict):
         raise BenchmarkExecutionError("journal-result", "journal result must be an object", str(path))
-    probe = _results_document(plan, package_manifest, [result])
-    _ = probe
+    _results_document(plan, package_manifest, [result])
     expected_common = {
         "run_id": run["run_id"],
         "model_family": run["model_family"],
@@ -399,13 +427,16 @@ def _journal_entries(
     if journal_root.exists():
         if journal_root.is_symlink() or not journal_root.is_dir():
             raise BenchmarkExecutionError("journal-root", "journal root must be a regular directory", str(journal_root))
-        extra = sorted(
-            path.name
-            for path in journal_root.glob("*.json")
-            if path.stem not in expected_ids
-        )
+        extra = sorted(path.name for path in journal_root.glob("*.json") if path.stem not in expected_ids)
         if extra:
             raise BenchmarkExecutionError("journal-extra", f"unexpected journal files: {extra}", str(journal_root))
+    image_root = results_root / IMAGE_DIR
+    if image_root.exists():
+        if image_root.is_symlink() or not image_root.is_dir():
+            raise BenchmarkExecutionError("image-root", "image root must be a regular directory", str(image_root))
+        extra_images = sorted(path.name for path in image_root.glob("*.png") if path.stem not in expected_ids)
+        if extra_images:
+            raise BenchmarkExecutionError("image-extra", f"unexpected result images: {extra_images}", str(image_root))
     for run in package_manifest["runs"]:
         path = _journal_path(results_root, run["run_id"])
         if not path.exists():
@@ -421,6 +452,23 @@ def _journal_entries(
         entries.append(result)
         by_run[run["run_id"]] = result
     return entries, by_run
+
+
+def _verify_aggregate(
+    results_root: Path,
+    plan: dict[str, Any],
+    package_manifest: dict[str, Any],
+    entries: list[dict[str, Any]],
+) -> None:
+    aggregate = results_root / RESULTS_FILE
+    if not aggregate.exists():
+        return
+    expected = _json_bytes(_results_document(plan, package_manifest, entries)) if entries else None
+    if aggregate.is_symlink() or not aggregate.is_file():
+        raise BenchmarkExecutionError("results-file", "aggregate results must be a regular file", str(aggregate))
+    actual = aggregate.read_bytes()
+    if expected is None or actual != expected:
+        raise BenchmarkExecutionError("results-bytes", "aggregate results differ from verified journals", str(aggregate))
 
 
 def _write_results(
@@ -449,13 +497,18 @@ def status(
         workspace_root,
     )
     _ = package
-    results = _resolve_directory(results_root, "results_root", create=True)
-    entries, by_run = _journal_entries(
-        results_root=results,
-        plan=plan,
-        package_manifest=package_manifest,
-        package_sha=package_sha,
-    )
+    results = _existing_directory(results_root, "results_root")
+    if results is None:
+        entries: list[dict[str, Any]] = []
+        by_run: dict[str, dict[str, Any]] = {}
+    else:
+        entries, by_run = _journal_entries(
+            results_root=results,
+            plan=plan,
+            package_manifest=package_manifest,
+            package_sha=package_sha,
+        )
+        _verify_aggregate(results, plan, package_manifest, entries)
     succeeded = sum(1 for entry in entries if entry["state"] == "succeeded")
     failed = sum(1 for entry in entries if entry["state"] == "failed")
     pending_runs = [run for run in package_manifest["runs"] if run["run_id"] not in by_run]
@@ -476,8 +529,6 @@ def status(
 
 
 def _failure_result(run: dict[str, Any], elapsed_ms: int, exc: Exception) -> dict[str, Any]:
-    code = _safe_error_code(getattr(exc, "code", exc.__class__.__name__))
-    message = _safe_error_message(getattr(exc, "message", str(exc)))
     return {
         "run_id": run["run_id"],
         "state": "failed",
@@ -490,16 +541,15 @@ def _failure_result(run: dict[str, Any], elapsed_ms: int, exc: Exception) -> dic
         "role_scope": run["role_scope"],
         "settings": run["settings"],
         "elapsed_ms": max(0, elapsed_ms),
-        "error": {"code": code, "message": message},
+        "error": {
+            "code": _safe_error_code(getattr(exc, "code", exc.__class__.__name__)),
+            "message": _safe_error_message(getattr(exc, "message", str(exc))),
+        },
     }
 
 
 def _success_result(
-    run: dict[str, Any],
-    elapsed_ms: int,
-    image_payload: bytes,
-    width: int,
-    height: int,
+    run: dict[str, Any], elapsed_ms: int, image_payload: bytes, width: int, height: int
 ) -> dict[str, Any]:
     return {
         "run_id": run["run_id"],
@@ -532,6 +582,7 @@ def _execute_one(
     poll_interval_seconds: float,
     clock: Callable[[], float],
     sleeper: Callable[[float], None],
+    attempt_state: dict[str, Any],
 ) -> dict[str, Any]:
     workflow_path = _contained_file(package_root, run["workflow_path"], f"workflow.{run['run_id']}")
     payload = workflow_path.read_bytes()
@@ -554,6 +605,7 @@ def _execute_one(
         return min(float(DEFAULT_REQUEST_TIMEOUT_SECONDS), value)
 
     prompt_id = _prompt_id(client.queue_prompt(workflow, timeout_seconds=remaining()))
+    attempt_state["prompt_id"] = prompt_id
     descriptors: list[dict[str, str]] | None = None
     while descriptors is None:
         history = client.history(prompt_id, timeout_seconds=remaining())
@@ -561,9 +613,7 @@ def _execute_one(
             descriptors = history_outputs(history, prompt_id, output_nodes, 1)
         except AdapterError as exc:
             raise BenchmarkExecutionError(
-                _safe_error_code(exc.code),
-                _safe_error_message(exc.message),
-                exc.field,
+                _safe_error_code(exc.code), _safe_error_message(exc.message), exc.field
             ) from exc
         if descriptors is None:
             delay = min(poll_interval_seconds, max(0.0, deadline - clock()))
@@ -574,9 +624,7 @@ def _execute_one(
         raise BenchmarkExecutionError("image-count", "benchmark run must produce exactly one image", run["run_id"])
     descriptor = descriptors[0]
     image_payload = client.image(
-        descriptor["filename"],
-        descriptor["subfolder"],
-        timeout_seconds=remaining(),
+        descriptor["filename"], descriptor["subfolder"], timeout_seconds=remaining()
     )
     exact = run["exact_comfyui_settings"]
     decoded = decode_comfyui_png(
@@ -584,8 +632,7 @@ def _execute_one(
         expected_width=int(exact["width"]),
         expected_height=int(exact["height"]),
     )
-    image_path = _image_path(results_root, run["run_id"])
-    _atomic_write(image_path, image_payload, replace=False)
+    _atomic_write(_image_path(results_root, run["run_id"]), image_payload, replace=False)
     elapsed_ms = int(max(0.0, clock() - started) * 1000)
     result = _success_result(run, elapsed_ms, image_payload, decoded.width, decoded.height)
     journal = _journal_document(
@@ -622,16 +669,22 @@ def run(
         raise BenchmarkExecutionError("execute-acknowledgement", "run requires explicit --execute", "execute")
     if not isinstance(max_runs, int) or isinstance(max_runs, bool) or not 1 <= max_runs <= MAX_RUNS:
         raise BenchmarkExecutionError("max-runs", f"max_runs must be 1..{MAX_RUNS}", "max_runs")
-    if not isinstance(run_timeout_seconds, (int, float)) or isinstance(run_timeout_seconds, bool) or not 1 <= run_timeout_seconds <= 3600:
+    if (
+        not isinstance(run_timeout_seconds, (int, float))
+        or isinstance(run_timeout_seconds, bool)
+        or not 1 <= run_timeout_seconds <= 3600
+    ):
         raise BenchmarkExecutionError("run-timeout", "run timeout must be 1..3600 seconds", "run_timeout_seconds")
-    if not isinstance(poll_interval_seconds, (int, float)) or isinstance(poll_interval_seconds, bool) or not 0.05 <= poll_interval_seconds <= 10:
+    if (
+        not isinstance(poll_interval_seconds, (int, float))
+        or isinstance(poll_interval_seconds, bool)
+        or not 0.05 <= poll_interval_seconds <= 10
+    ):
         raise BenchmarkExecutionError("poll-interval", "poll interval must be 0.05..10 seconds", "poll_interval_seconds")
+
     sanitized = sanitize_loopback_endpoint(endpoint)
     package, plan, _install, package_manifest, package_sha = _package_context(
-        package_root,
-        plan_path,
-        install_manifest_path,
-        workspace_root,
+        package_root, plan_path, install_manifest_path, workspace_root
     )
     results = _resolve_directory(results_root, "results_root", create=True)
     entries, by_run = _journal_entries(
@@ -640,11 +693,13 @@ def run(
         package_manifest=package_manifest,
         package_sha=package_sha,
     )
-    candidate_runs = []
-    for item in package_manifest["runs"]:
-        existing = by_run.get(item["run_id"])
-        if existing is None or (retry_failed and existing["state"] == "failed"):
-            candidate_runs.append(item)
+    _verify_aggregate(results, plan, package_manifest, entries)
+    candidate_runs = [
+        item
+        for item in package_manifest["runs"]
+        if item["run_id"] not in by_run
+        or (retry_failed and by_run[item["run_id"]]["state"] == "failed")
+    ]
     if not candidate_runs:
         _write_results(results, plan, package_manifest, entries)
         snapshot = status(package, plan_path, install_manifest_path, workspace_root, results)
@@ -664,7 +719,7 @@ def run(
             json.dumps(diagnostics, ensure_ascii=True, sort_keys=True, separators=(",", ":")),
             "comfyui",
         )
-    client = client_factory(
+    raw_client = client_factory(
         sanitized,
         HttpLimits(
             queue_response_bytes=DEFAULT_QUEUE_RESPONSE_BYTES,
@@ -673,18 +728,14 @@ def run(
             request_timeout_seconds=DEFAULT_REQUEST_TIMEOUT_SECONDS,
         ),
     )
+    client = _TrackingClient(raw_client)
     attempted = 0
-    queued = False
     for item in candidate_runs[:max_runs]:
         attempted += 1
         started = clock()
-        old = by_run.get(item["run_id"])
-        if old is not None and old["state"] == "failed" and retry_failed:
-            old_journal = _journal_path(results, item["run_id"])
-            if old_journal.exists() and old_journal.is_file() and not old_journal.is_symlink():
-                old_journal.unlink()
+        attempt_state: dict[str, Any] = {}
         try:
-            result = _execute_one(
+            _execute_one(
                 package_root=package,
                 results_root=results,
                 package_manifest=package_manifest,
@@ -695,8 +746,8 @@ def run(
                 poll_interval_seconds=float(poll_interval_seconds),
                 clock=clock,
                 sleeper=sleeper,
+                attempt_state=attempt_state,
             )
-            queued = True
         except KeyboardInterrupt:
             raise
         except Exception as exc:
@@ -706,7 +757,7 @@ def run(
                 package_manifest=package_manifest,
                 package_sha=package_sha,
                 run=item,
-                prompt_id=None,
+                prompt_id=attempt_state.get("prompt_id"),
                 result=result,
             )
             _atomic_write(_journal_path(results, item["run_id"]), _json_bytes(journal), replace=True)
@@ -717,12 +768,13 @@ def run(
             package_sha=package_sha,
         )
         _write_results(results, plan, package_manifest, entries)
+
     snapshot = status(package, plan_path, install_manifest_path, workspace_root, results)
     snapshot.update(
         {
             "attempted": attempted,
             "network_contacted": True,
-            "prompt_queued": queued,
+            "prompt_queued": client.prompt_queued,
             "readiness_checked": True,
         }
     )
