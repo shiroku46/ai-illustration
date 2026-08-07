@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/identity-lock-plan.schema.json",
+  "title": "Identity lock experiment plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "schema_version", "id", "version", "status", "selected_model", "roles", "pose_targets", "expression_targets", "strategies"],
+  "properties": {
+    "kind": {"const": "identity-lock-plan"},
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "version": {"type": "string", "pattern": "^v[0-9]{3}$"},
+    "status": {"const": "prepared"},
+    "selected_model": {"$ref": "#/$defs/selectedModel"},
+    "roles": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {"$ref": "#/$defs/role"},
+      "allOf": [
+        {"contains": {"properties": {"role": {"const": "boke"}}, "required": ["role"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"role": {"const": "tsukkomi"}}, "required": ["role"]}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "pose_targets": {"type": "array", "minItems": 3, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}},
+    "expression_targets": {"type": "array", "minItems": 3, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}},
+    "strategies": {
+      "type": "array",
+      "minItems": 2,
+      "items": {"$ref": "#/$defs/strategy"},
+      "allOf": [
+        {"contains": {"properties": {"type": {"const": "reference-only"}}, "required": ["type"]}, "minContains": 1},
+        {"contains": {"properties": {"type": {"const": "reference-plus-pose"}}, "required": ["type"]}, "minContains": 1}
+      ]
+    },
+    "notes": {"type": "string", "minLength": 1}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "token": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "safePath": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"},
+    "selectedModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "profile_ref", "profile_sha256", "workflow_sha256", "benchmark_review_ref", "benchmark_review_sha256", "production_eligible"],
+      "properties": {
+        "family": {"$ref": "#/$defs/token"},
+        "profile_ref": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*@v[0-9]{3}$"},
+        "profile_sha256": {"$ref": "#/$defs/sha256"},
+        "workflow_sha256": {"$ref": "#/$defs/sha256"},
+        "benchmark_review_ref": {"$ref": "#/$defs/token"},
+        "benchmark_review_sha256": {"$ref": "#/$defs/sha256"},
+        "production_eligible": {"const": true}
+      }
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "candidate_id", "request_id", "image_sha256", "reference_path"],
+      "properties": {
+        "role": {"enum": ["boke", "tsukkomi"]},
+        "candidate_id": {"$ref": "#/$defs/token"},
+        "request_id": {"$ref": "#/$defs/token"},
+        "image_sha256": {"$ref": "#/$defs/sha256"},
+        "reference_path": {"$ref": "#/$defs/safePath"}
+      }
+    },
+    "controlAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pose", "path", "sha256"],
+      "properties": {
+        "pose": {"$ref": "#/$defs/token"},
+        "path": {"$ref": "#/$defs/safePath"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "strategy": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type"],
+          "properties": {
+            "id": {"$ref": "#/$defs/token"},
+            "type": {"const": "reference-only"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "control_method", "control_assets"],
+          "properties": {
+            "id": {"$ref": "#/$defs/token"},
+            "type": {"const": "reference-plus-pose"},
+            "control_method": {"enum": ["openpose", "lineart", "depth", "t2i-adapter"]},
+            "control_assets": {"type": "array", "minItems": 3, "items": {"$ref": "#/$defs/controlAsset"}}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "dataset_manifest_sha256", "training_artifact_sha256", "training_config_sha256", "license_status", "provenance_status"],
+          "properties": {
+            "id": {"$ref": "#/$defs/token"},
+            "type": {"const": "character-lora"},
+            "dataset_manifest_sha256": {"$ref": "#/$defs/sha256"},
+            "training_artifact_sha256": {"$ref": "#/$defs/sha256"},
+            "training_config_sha256": {"$ref": "#/$defs/sha256"},
+            "license_status": {"const": "approved"},
+            "provenance_status": {"const": "approved"}
+          }
+        }
+      ]
+    }
+  }
+}
