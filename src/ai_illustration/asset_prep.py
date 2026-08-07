@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from fractions import Fraction
 import hashlib
 import json
-import math
 import os
 from pathlib import Path
 import shutil
@@ -541,7 +540,8 @@ def _prepare(profile_path: Path, package_manifest_path: Path, package_root: Path
     if package.get("identity_gate") != "owner-approved":
         raise AssetPrepError("IDENTITY_GATE_REQUIRED", "asset preparation requires owner-approved identity gate", "identity_gate")
     for field in ("identity_review_ref", "identity_review_sha256", "identity_strategy_id", "identity_model"):
-        if package.get(field) in {None, ""}:
+        value = package.get(field)
+        if value is None or value == "":
             raise AssetPrepError("IDENTITY_BINDING_REQUIRED", f"missing production identity binding: {field}", field)
     if not isinstance(package.get("identity_evidence_run_ids"), list) or not package["identity_evidence_run_ids"]:
         raise AssetPrepError("IDENTITY_BINDING_REQUIRED", "production identity evidence runs are required", "identity_evidence_run_ids")
