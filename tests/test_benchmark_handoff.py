@@ -46,7 +46,11 @@ class FakeClient:
 
     def queue_prompt(self, workflow, *, timeout_seconds=None):
         if self.fail_queue:
-            raise AdapterError("HTTP_STATUS", "HTTP 500 at C:\\private\\ComfyUI", "/prompt")
+            raise AdapterError(
+                "HTTP_STATUS",
+                "HTTP 500 at C:\\private\\ComfyUI using sk-supersecret12345678",
+                "/prompt",
+            )
         self.output_node = next(
             node_id
             for node_id, node in workflow.items()
@@ -144,11 +148,14 @@ class BenchmarkHandoffTest(unittest.TestCase):
         self.assertIn("image_sha256", runs[0])
         self.assertNotIn("image_path", runs[0])
         self.assertEqual("http-status", runs[1]["error"]["code"])
-        self.assertIn("C:\\private\\ComfyUI", runs[1]["error"]["message"])
+        self.assertIn("[path]", runs[1]["error"]["message"])
+        self.assertIn("[redacted]", runs[1]["error"]["message"])
 
         encoded = json.dumps(result, sort_keys=True)
         self.assertNotIn(str(self.results), encoded)
         self.assertNotIn(str(self.comfy), encoded)
+        self.assertNotIn("C:\\private\\ComfyUI", encoded)
+        self.assertNotIn("sk-supersecret", encoded)
         self.assertNotIn("prompt-1", encoded)
         self.assertNotIn("benchmark_00001_.png", encoded)
         self.assertNotIn("api_key", encoded.lower())
