@@ -18,6 +18,7 @@ from ai_illustration import identity_lock_review as rv
 from ai_illustration.exporter import ExportError, build_export_package, check_export_package
 from ai_illustration.naming import canonical_json, content_identifier
 from ai_illustration.quality import CREATIVE_CANDIDATE, TECHNICAL_CANDIDATE
+from ai_illustration.variant_review import expected_review_id, variant_set_sha256
 from ai_illustration.variants import IdentityEvidence, VariantError, plan_variant_set
 
 
@@ -263,7 +264,41 @@ class ExporterTests(unittest.TestCase):
         self._restore_sources_for(production)
         return production, path
 
+    def _formal_review(self, variant_set: dict[str, object], variant: dict[str, object]) -> dict[str, object]:
+        png_path = self.sources / f"{variant['id']}.png"
+        review: dict[str, object] = {
+            "kind": "variant-review-decision",
+            "schema_version": "1.0",
+            "id": "variant-review-" + "0" * 20,
+            "variant_set_ref": variant_set["id"],
+            "variant_set_sha256": variant_set_sha256(variant_set),
+            "variant_id": variant["id"],
+            "png_sha256": hashlib.sha256(png_path.read_bytes()).hexdigest(),
+            "source_candidate_ref": variant_set["source_candidate_ref"],
+            "source_request_ref": variant_set["source_request_ref"],
+            "source_candidate_sha256": variant_set["source_candidate_sha256"],
+            "identity_gate": variant_set["identity_gate"],
+            "identity_review_ref": variant_set["identity_review_ref"],
+            "identity_review_sha256": variant_set["identity_review_sha256"],
+            "identity_strategy_id": variant_set["identity_strategy_id"],
+            "identity_evidence_run_ids": list(variant_set["identity_evidence_run_ids"]),
+            "identity_model": copy.deepcopy(variant_set["identity_model"]),
+            "decision": "accept",
+            "result_state": "production-variant-approved",
+            "reviewer": "owner",
+            "timestamp": "2026-08-07T08:00:00Z",
+            "hard_fail_categories": [],
+            "observations": ["fixture production variant approved"],
+        }
+        review["id"] = expected_review_id(review)
+        return review
+
     def _write_approvals(self, variant_set: dict[str, object]) -> None:
+        self._clear(self.approvals)
+        for variant in variant_set["variants"]:
+            _write_json(self.approvals / f"{variant['id']}.json", self._formal_review(variant_set, variant))
+
+    def _write_legacy_approvals(self, variant_set: dict[str, object]) -> None:
         self._clear(self.approvals)
         for variant in variant_set["variants"]:
             png_path = self.sources / f"{variant['id']}.png"
@@ -320,6 +355,12 @@ class ExporterTests(unittest.TestCase):
                 write=False,
             )
 
+    def test_production_rejects_legacy_review_format(self) -> None:
+        production, production_path = self._production_variant_set()
+        self._write_legacy_approvals(production)
+        with self.assertRaisesRegex(ExportError, "VARIANT_REVIEW_SCHEMA"):
+            self._build(variant_set_path=production_path, approval_root=self.approvals)
+
     def test_production_requires_included_exact_byte_bound_accept_reviews(self) -> None:
         production, production_path = self._production_variant_set()
         with self.assertRaisesRegex(ExportError, "PRODUCTION_VARIANT_REVIEW_REQUIRED"):
@@ -332,32 +373,74 @@ class ExporterTests(unittest.TestCase):
             variant_set_path=production_path,
             approval_root=self.approvals,
         )
-        self.assertEqual(result["package"]["intent"], "production")
-        self.assertTrue(all("variant_review_path" in item for item in result["package"]["items"]))
+        package = result["package"]
+        self.assertEqual(package["intent"], "production")
+        self.assertEqual(package["variant_set_sha256"], variant_set_sha256(production))
+        self.assertEqual(package["identity_gate"], "owner-approved")
+        self.assertEqual(package["identity_review_ref"], production["identity_review_ref"])
+        self.assertEqual(package["identity_model"], production["identity_model"])
+        self.assertTrue(all("variant_review_path" in item for item in package["items"]))
         package_root = production_output / result["package_directory"]
-        for item in result["package"]["items"]:
-            self.assertTrue((package_root / item["variant_review_path"]).is_file())
-        self.assertTrue(
-            check_export_package(package_root / "package-manifest.json", production_output)["ok"]
-        )
+        for item in package["items"]:
+            review_path = package_root / item["variant_review_path"]
+            self.assertTrue(review_path.is_file())
+            review = json.loads(review_path.read_text(encoding="utf-8"))
+            self.assertEqual(review["id"], item["variant_review_ref"])
+            self.assertEqual(hashlib.sha256(review_path.read_bytes()).hexdigest(), item["variant_review_sha256"])
+        self.assertTrue(check_export_package(package_root / "package-manifest.json", production_output)["ok"])
 
         first = production["variants"][0]
         review_path = self.approvals / f"{first['id']}.json"
         review = json.loads(review_path.read_text(encoding="utf-8"))
         review["png_sha256"] = "0" * 64
-        review_core = {key: value for key, value in review.items() if key != "id"}
-        review["id"] = content_identifier("variant-review", review_core, 20)
+        review["id"] = expected_review_id(review)
         _write_json(review_path, review)
-        with self.assertRaisesRegex(ExportError, "VARIANT_REVIEW_CHECKSUM"):
+        with self.assertRaisesRegex(ExportError, "VARIANT_REVIEW_BINDING_MISMATCH"):
             self._build(variant_set_path=production_path, approval_root=self.approvals)
 
         self._write_approvals(production)
         review = json.loads(review_path.read_text(encoding="utf-8"))
         review["decision"] = "reject"
-        review_core = {key: value for key, value in review.items() if key != "id"}
-        review["id"] = content_identifier("variant-review", review_core, 20)
+        review["result_state"] = "rejected"
+        review["id"] = expected_review_id(review)
         _write_json(review_path, review)
         with self.assertRaisesRegex(ExportError, "VARIANT_REVIEW_NOT_ACCEPTED"):
+            self._build(variant_set_path=production_path, approval_root=self.approvals)
+
+    def test_production_review_bindings_and_hard_fails_fail_closed(self) -> None:
+        production, production_path = self._production_variant_set()
+        first = production["variants"][0]
+        cases = {
+            "variant_set_sha256": "0" * 64,
+            "source_candidate_ref": "candidate-other",
+            "identity_strategy_id": "other-strategy",
+        }
+        for field, value in cases.items():
+            with self.subTest(field=field):
+                self._write_approvals(production)
+                review_path = self.approvals / f"{first['id']}.json"
+                review = json.loads(review_path.read_text(encoding="utf-8"))
+                review[field] = value
+                review["id"] = expected_review_id(review)
+                _write_json(review_path, review)
+                with self.assertRaisesRegex(ExportError, "VARIANT_REVIEW_BINDING_MISMATCH"):
+                    self._build(variant_set_path=production_path, approval_root=self.approvals)
+
+        self._write_approvals(production)
+        review_path = self.approvals / f"{first['id']}.json"
+        review = json.loads(review_path.read_text(encoding="utf-8"))
+        review["identity_model"] = {**review["identity_model"], "family": "other-family"}
+        review["id"] = expected_review_id(review)
+        _write_json(review_path, review)
+        with self.assertRaisesRegex(ExportError, "VARIANT_REVIEW_BINDING_MISMATCH"):
+            self._build(variant_set_path=production_path, approval_root=self.approvals)
+
+        self._write_approvals(production)
+        review = json.loads(review_path.read_text(encoding="utf-8"))
+        review["hard_fail_categories"] = ["identity_drift"]
+        review["id"] = expected_review_id(review)
+        _write_json(review_path, review)
+        with self.assertRaisesRegex(ExportError, "VARIANT_REVIEW_HARD_FAIL"):
             self._build(variant_set_path=production_path, approval_root=self.approvals)
 
     def test_export_check_rejects_tampered_production_review_binding(self) -> None:
@@ -370,8 +453,7 @@ class ExporterTests(unittest.TestCase):
         review_path = package_root / first_item["variant_review_path"]
         review = json.loads(review_path.read_text(encoding="utf-8"))
         review["png_sha256"] = "0" * 64
-        review_core = {key: value for key, value in review.items() if key != "id"}
-        review["id"] = content_identifier("variant-review", review_core, 20)
+        review["id"] = expected_review_id(review)
         _write_canonical(review_path, review)
         with self.assertRaisesRegex(ExportError, "VARIANT_REVIEW_FILE_MISMATCH"):
             check_export_package(package_root / "package-manifest.json", output)
@@ -391,9 +473,7 @@ class ExporterTests(unittest.TestCase):
         malicious_package["license_status"] = "rejected"
         sidecar_payloads: dict[str, bytes] = {}
         for item in malicious_package["items"]:
-            sidecar = json.loads(
-                (old_root / item["sidecar_path"]).read_text(encoding="utf-8")
-            )
+            sidecar = json.loads((old_root / item["sidecar_path"]).read_text(encoding="utf-8"))
             sidecar["license_status"] = "rejected"
             payload = canonical_json(sidecar) + b"\n"
             item["sidecar_sha256"] = hashlib.sha256(payload).hexdigest()
@@ -409,6 +489,9 @@ class ExporterTests(unittest.TestCase):
             check_export_package(malicious_root / "package-manifest.json", output)
 
     def test_evaluation_rejects_approval_root_and_embedded_approval_claims(self) -> None:
+        self.assertEqual(self._build()["package"]["identity_gate"], "evaluation-unlocked")
+        self.assertIsNone(self._build()["package"]["identity_review_ref"])
+        self.assertEqual(self._build()["package"]["identity_evidence_run_ids"], [])
         with self.assertRaisesRegex(ExportError, "APPROVAL_ROOT_NOT_ALLOWED"):
             self._build(approval_root=self.approvals)
         output = self.root / "evaluation-claim"
@@ -438,6 +521,16 @@ class ExporterTests(unittest.TestCase):
         _write_canonical(reviewer_root / "package-manifest.json", reviewer_only_package)
         with self.assertRaisesRegex(ExportError, "EVALUATION_REVIEW_CLAIM"):
             check_export_package(reviewer_root / "package-manifest.json", output)
+
+        malicious_identity = copy.deepcopy(result["package"])
+        malicious_identity["identity_gate"] = "owner-approved"
+        identity_core = {key: value for key, value in malicious_identity.items() if key != "id"}
+        malicious_identity["id"] = content_identifier("variant-export-package", identity_core, 20)
+        identity_root = output / malicious_identity["id"]
+        shutil.copytree(old_root, identity_root)
+        _write_canonical(identity_root / "package-manifest.json", malicious_identity)
+        with self.assertRaisesRegex(ExportError, "EVALUATION_IDENTITY_CLAIM"):
+            check_export_package(identity_root / "package-manifest.json", output)
 
         malicious_sidecar_package = copy.deepcopy(result["package"])
         sidecar_item = malicious_sidecar_package["items"][0]
