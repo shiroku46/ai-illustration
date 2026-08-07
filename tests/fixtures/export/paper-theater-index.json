@@ -2,22 +2,22 @@
   "entries": [
     {
       "key": "boke.boke.neutral.listening.front.full.closed",
-      "png_path": "variants/v1/boke/full/front/listening-neutral-closed/variant-bad0407a3784746a895f.png",
+      "png_path": "variants/v1/boke/full/front/listening-neutral-closed/variant-571e66822d0d49567a1e.png",
       "sha256": "1d644375a84ba8f6e77ef1826ba2589d0f7ebca6980235c2e4827ccdfdb8448b",
-      "sidecar_path": "variants/v1/boke/full/front/listening-neutral-closed/variant-bad0407a3784746a895f.json",
-      "variant_id": "variant-bad0407a3784746a895f"
+      "sidecar_path": "variants/v1/boke/full/front/listening-neutral-closed/variant-571e66822d0d49567a1e.json",
+      "variant_id": "variant-571e66822d0d49567a1e"
     },
     {
       "key": "boke.boke.smile.talking.front.full",
-      "png_path": "variants/v1/boke/full/front/talking-smile/variant-065de3c2d114fbdcd8ee.png",
+      "png_path": "variants/v1/boke/full/front/talking-smile/variant-aa99f93587dda1c30b93.png",
       "sha256": "240621cf7524d21b5379f69bfe6c98cebe1a25838ce46d32bcd5d8b8fabdc091",
-      "sidecar_path": "variants/v1/boke/full/front/talking-smile/variant-065de3c2d114fbdcd8ee.json",
-      "variant_id": "variant-065de3c2d114fbdcd8ee"
+      "sidecar_path": "variants/v1/boke/full/front/talking-smile/variant-aa99f93587dda1c30b93.json",
+      "variant_id": "variant-aa99f93587dda1c30b93"
     }
   ],
-  "id": "paper-theater-index-492ea9ec28416ff748c5",
+  "id": "paper-theater-index-f60777f699dd0fa006ab",
   "intent": "evaluation",
   "kind": "paper-theater-index",
   "schema_version": "1.0",
-  "variant_set_ref": "variant-set-5a90df4c3ba46c88ff45"
+  "variant_set_ref": "variant-set-f1ee3744ca71040a3b10"
 }
