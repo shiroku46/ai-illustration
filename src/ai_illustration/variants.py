@@ -7,6 +7,12 @@ import json
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .identity_lock import load_plan
+from .identity_lock_review import (
+    _load_object as load_identity_object,
+    review_sha256 as identity_review_sha256,
+    validate_review as validate_identity_lock_review,
+)
 from .models import Manifest
 from .naming import SHA256_RE, TOKEN_RE, canonical_json, content_identifier, safe_relative_path
 from .quality import QualityGateError, require_creative_candidate
@@ -19,6 +25,14 @@ UNRESOLVED_FIELDS = (
 )
 MATRIX_FIELDS = {"combinations", *UNRESOLVED_FIELDS}
 COMBINATION_FIELDS = {"expression", "pose", "facing", "crop", "mouth_state"}
+IDENTITY_FIELDS = {
+    "identity_gate",
+    "identity_review_ref",
+    "identity_review_sha256",
+    "identity_strategy_id",
+    "identity_evidence_run_ids",
+    "identity_model",
+}
 MAX_VARIANTS = 512
 
 
@@ -33,6 +47,17 @@ class VariantError(ValueError):
 
     def to_dict(self) -> dict[str, str]:
         return {"code": self.code, "message": self.message, "field": self.field}
+
+
+@dataclass(frozen=True)
+class IdentityEvidence:
+    """Exact local evidence required to authorize a production variant set."""
+
+    review: Path
+    plan: Path
+    results: Path
+    result_root: Path
+    package_root: Path
 
 
 def load_json_object(path: Path) -> dict[str, Any]:
@@ -163,6 +188,7 @@ def _source_context(
     return {
         "candidate": c,
         "request": r,
+        "request_id": request.manifest_id,
         "review": rv,
         "review_id": review.manifest_id,
         "character": character.data,
@@ -172,6 +198,107 @@ def _source_context(
         "style_id": style_id,
         "style_version": style_version,
     }
+
+
+def _evaluation_identity_fields() -> dict[str, Any]:
+    return {
+        "identity_gate": "evaluation-unlocked",
+        "identity_review_ref": None,
+        "identity_review_sha256": None,
+        "identity_strategy_id": None,
+        "identity_evidence_run_ids": [],
+        "identity_model": None,
+    }
+
+
+def _production_identity_fields(
+    source: dict[str, Any],
+    candidate_id: str,
+    evidence: IdentityEvidence,
+) -> dict[str, Any]:
+    try:
+        review = load_identity_object(evidence.review, "identity_review")
+        plan = load_plan(evidence.plan)
+        results = load_identity_object(evidence.results, "identity_results")
+        diagnostics, locks = validate_identity_lock_review(
+            review,
+            plan,
+            results,
+            result_root=evidence.result_root,
+            package_root=evidence.package_root,
+        )
+    except (OSError, ValueError) as exc:
+        raise VariantError("IDENTITY_EVIDENCE_LOAD", str(exc), "identity_evidence") from exc
+    if diagnostics:
+        first = diagnostics[0]
+        raise VariantError(
+            f"IDENTITY_LOCK_{first['code']}",
+            first["message"],
+            first.get("field", "identity_evidence"),
+        )
+    role = source["character"].get("role")
+    lock = locks.get(role) if isinstance(role, str) else None
+    if not isinstance(lock, dict):
+        raise VariantError("IDENTITY_LOCK_ROLE", "owner approval did not return a lock for the source role", "identity_evidence")
+    expected_source = {
+        "candidate_id": candidate_id,
+        "request_id": source["request_id"],
+        "identity_sha256": source["candidate"]["sha256"],
+    }
+    for field, expected in expected_source.items():
+        if lock.get(field) != expected:
+            raise VariantError(
+                "IDENTITY_SOURCE_MISMATCH",
+                f"identity lock {field} does not bind the exact source candidate",
+                field,
+            )
+    profile_ref = lock.get("model_profile_ref")
+    profile_id = profile_ref.rsplit("@", 1)[0] if isinstance(profile_ref, str) and "@" in profile_ref else None
+    if source["request"].get("model_id") != profile_id:
+        raise VariantError(
+            "IDENTITY_MODEL_MISMATCH",
+            "source generation request model_id does not match the owner-approved production model profile",
+            "model_id",
+        )
+    accepted = lock.get("accepted_run_ids")
+    if not isinstance(accepted, list) or not accepted:
+        raise VariantError("IDENTITY_RUNS", "identity lock must contain accepted evidence runs", "accepted_run_ids")
+    return {
+        "identity_gate": "owner-approved",
+        "identity_review_ref": review["id"],
+        "identity_review_sha256": identity_review_sha256(review),
+        "identity_strategy_id": lock["strategy_id"],
+        "identity_evidence_run_ids": list(accepted),
+        "identity_model": {
+            "family": lock["model_family"],
+            "profile_ref": lock["model_profile_ref"],
+            "profile_sha256": lock["model_profile_sha256"],
+            "workflow_sha256": lock["workflow_sha256"],
+        },
+    }
+
+
+def _identity_fields(
+    source: dict[str, Any],
+    candidate_id: str,
+    intent: str,
+    identity_evidence: IdentityEvidence | None,
+) -> dict[str, Any]:
+    if intent == "evaluation":
+        if identity_evidence is not None:
+            raise VariantError(
+                "IDENTITY_EVIDENCE_NOT_ALLOWED",
+                "evaluation variant planning must not carry production identity evidence",
+                "identity_evidence",
+            )
+        return _evaluation_identity_fields()
+    if identity_evidence is None:
+        raise VariantError(
+            "IDENTITY_LOCK_REQUIRED",
+            "production variant planning requires exact owner-approved identity-lock evidence",
+            "identity_evidence",
+        )
+    return _production_identity_fields(source, candidate_id, identity_evidence)
 
 
 def _normalize_matrix(matrix: dict[str, Any], source: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -243,10 +370,18 @@ def _variant_path(character_id: str, item: dict[str, Any], variant_id: str) -> t
     return png, sidecar
 
 
-def plan_variant_set(manifest_root: Path, candidate_id: str, matrix: dict[str, Any], intent: str) -> dict[str, Any]:
+def plan_variant_set(
+    manifest_root: Path,
+    candidate_id: str,
+    matrix: dict[str, Any],
+    intent: str,
+    *,
+    identity_evidence: IdentityEvidence | None = None,
+) -> dict[str, Any]:
     candidate_id = _token(candidate_id, "source_candidate")
     index = _manifest_index(manifest_root)
     source = _source_context(index, candidate_id, intent, manifest_root)
+    identity_info = _identity_fields(source, candidate_id, intent, identity_evidence)
     combinations, matrix_info = _normalize_matrix(matrix, source)
     variants: list[dict[str, Any]] = []
     used_paths: set[str] = set()
@@ -256,6 +391,7 @@ def plan_variant_set(manifest_root: Path, candidate_id: str, matrix: dict[str, A
             "source_candidate_sha256": source["candidate"]["sha256"],
             "character_ref": source["request"]["character_ref"],
             "style_ref": source["request"]["style_ref"],
+            "identity_gate": identity_info,
             "combination": item,
             "width": matrix_info["width"],
             "height": matrix_info["height"],
@@ -288,7 +424,7 @@ def plan_variant_set(manifest_root: Path, candidate_id: str, matrix: dict[str, A
         "schema_version": "1.0",
         "intent": intent,
         "source_candidate_ref": candidate_id,
-        "source_request_ref": source["request"]["id"],
+        "source_request_ref": source["request_id"],
         "source_candidate_sha256": source["candidate"]["sha256"],
         "review_ref": source["review_id"],
         "character_ref": source["request"]["character_ref"],
@@ -297,18 +433,24 @@ def plan_variant_set(manifest_root: Path, candidate_id: str, matrix: dict[str, A
         "tool_id": source["request"]["tool_id"],
         "model_id": source["request"]["model_id"],
         "license_status": source["request"].get("license_status"),
+        **identity_info,
         **matrix_info["decisions"],
         "variants": variants,
     }
     return {"id": content_identifier("variant-set", core, 20), **core}
 
 
-def validate_variant_set(data: dict[str, Any], manifest_root: Path) -> dict[str, Any]:
+def validate_variant_set(
+    data: dict[str, Any],
+    manifest_root: Path,
+    *,
+    identity_evidence: IdentityEvidence | None = None,
+) -> dict[str, Any]:
     required = {
         "id", "kind", "schema_version", "intent", "source_candidate_ref",
         "source_request_ref", "source_candidate_sha256", "review_ref", "character_ref",
-        "style_ref", "role", "tool_id", "model_id", "license_status", *UNRESOLVED_FIELDS,
-        "variants",
+        "style_ref", "role", "tool_id", "model_id", "license_status", *IDENTITY_FIELDS,
+        *UNRESOLVED_FIELDS, "variants",
     }
     if set(data) != required:
         missing = sorted(required - set(data))
@@ -326,11 +468,26 @@ def validate_variant_set(data: dict[str, Any], manifest_root: Path) -> dict[str,
         ],
         **{name: data.get(name) for name in UNRESOLVED_FIELDS},
     }
-    expected = plan_variant_set(manifest_root, data.get("source_candidate_ref", ""), matrix, data.get("intent", ""))
+    expected = plan_variant_set(
+        manifest_root,
+        data.get("source_candidate_ref", ""),
+        matrix,
+        data.get("intent", ""),
+        identity_evidence=identity_evidence,
+    )
     if canonical_json(data) != canonical_json(expected):
         raise VariantError("PLAN_MISMATCH", "variant-set is not the canonical plan for its bound inputs", "variant-set")
     return expected
 
 
-def check_variant_set(path: Path, manifest_root: Path) -> dict[str, Any]:
-    return validate_variant_set(load_json_object(path), manifest_root)
+def check_variant_set(
+    path: Path,
+    manifest_root: Path,
+    *,
+    identity_evidence: IdentityEvidence | None = None,
+) -> dict[str, Any]:
+    return validate_variant_set(
+        load_json_object(path),
+        manifest_root,
+        identity_evidence=identity_evidence,
+    )
