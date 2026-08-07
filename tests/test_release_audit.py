@@ -22,6 +22,7 @@ from ai_illustration.release_audit import (
     MINIMUM_HUMAN_DECISIONS,
     MINIMUM_PROHIBITED_EFFECTS,
     MINIMUM_PROTECTED_SOURCES,
+    QUALITY_RESET_CRITICAL_PATHS,
     RELEASE_VERSION,
     SOFTWARE_COMPLETION_DEFINITION,
     ReleaseAuditError,
@@ -143,6 +144,55 @@ class ReleaseAuditTests(unittest.TestCase):
         self.assertFalse(first["network_contacted"])
         self.assertFalse(first["external_process_started"])
         self.assertFalse(first["filesystem_mutated"])
+
+    def test_quality_reset_paths_are_explicitly_release_critical(self) -> None:
+        expected = {
+            "src/ai_illustration/quality.py",
+            "web/review/app.js",
+            "schemas/art-direction-profile.schema.json",
+            "src/ai_illustration/art_direction.py",
+            "schemas/model-benchmark-results.schema.json",
+            "src/ai_illustration/benchmark_review.py",
+            "schemas/identity-lock-review.schema.json",
+            "src/ai_illustration/identity_lock_review.py",
+            "src/ai_illustration/variants.py",
+            "schemas/variant-review-decision.schema.json",
+            "src/ai_illustration/variant_review.py",
+            "src/ai_illustration/exporter.py",
+            "schemas/asset-prep-profile.schema.json",
+            "src/ai_illustration/asset_prep.py",
+            "docs/ASSET_PREP.md",
+        }
+        self.assertTrue(expected.issubset(QUALITY_RESET_CRITICAL_PATHS))
+        self.assertTrue(QUALITY_RESET_CRITICAL_PATHS.issubset(MINIMUM_CRITICAL_PATHS))
+        self.assertIn("art-direction-approval", MINIMUM_HUMAN_DECISIONS)
+        self.assertIn("benchmark-model-selection", MINIMUM_HUMAN_DECISIONS)
+        self.assertIn("identity-lock-approval", MINIMUM_HUMAN_DECISIONS)
+        self.assertIn("actual-three-family-benchmark-on-owner-hardware", MINIMUM_EXTERNAL_PREREQUISITES)
+        self.assertIn("real benchmark", CONTENT_COMPLETION_DEFINITION)
+
+    def test_omitting_quality_reset_source_schema_doc_or_browser_path_fails_closed(self) -> None:
+        representatives = (
+            "src/ai_illustration/asset_prep.py",
+            "schemas/identity-lock-review.schema.json",
+            "docs/QUALITY_STAGES.md",
+            "web/review/app.js",
+        )
+        for relative in representatives:
+            with self.subTest(relative=relative):
+                value = contract_document()
+                value["critical_paths"] = [
+                    item for item in value["critical_paths"] if item != relative
+                ]
+                core = {key: value[key] for key in value if key != "id"}
+                value["id"] = content_identifier(
+                    "ai-illustration-mvp-release", core, 20
+                )
+                self.contract.write_bytes(canonical(value))
+                with self.assertRaises(ReleaseAuditError) as caught:
+                    audit_release(self.contract)
+                self.assertEqual(caught.exception.code, "CRITICAL_PATHS")
+                self._write_repository()
 
     def test_version_scripts_dependencies_package_and_registry_mismatches(self) -> None:
         pyproject = self.root / "pyproject.toml"
