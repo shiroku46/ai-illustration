@@ -1,73 +1,50 @@
-# Software MVP 1.0 completion
+# Software MVP completion boundary
 
-The repository is complete as a **software MVP** when the canonical release contract at `release/mvp-v1.json` passes the read-only release audit and the repository CI and full unit-test suite pass on the same immutable revision.
+The repository has a deterministic, read-only release audit for the **software** surface. Passing that audit means the declared code, schemas, browser review assets, quality gates, local packaging/rendering tools, and operator-facing contracts are present and internally consistent. It does **not** mean that final character art, real benchmark evidence, identity locks, production variants, audio, or final encoded media exist.
 
-## Included software capabilities
+## Quality-reset software gates
 
-Version 1.0 provides a verified local-first path for:
+The release audit now treats the following as critical software paths. Removing their source, schema, or governing documentation makes the software release incomplete:
 
-1. versioned character, style, generation, candidate, review, and export manifests;
-2. local tool/model evidence, compatibility, installation, licensing, and commercial-review profiles;
-3. deterministic ComfyUI workflow binding and dry-run planning;
-4. explicit approved fixed-seed loopback-only ComfyUI execution;
-5. checksum-bound candidate PNG packages that remain unreviewed;
-6. loopback-only candidate review UI and structured review decisions;
-7. accepted-identity-bound expression and pose variant planning;
-8. verified caller-supplied PNG export packages;
-9. deterministic two-character paper-theater scene planning;
-10. fully offline image and WAV previews;
-11. rational frame planning, explicit composition profiles, and deterministic RGBA frame rendering;
-12. offline rendered-frame playback;
-13. explicit-profile, checksum-pinned local FFmpeg video export;
-14. multi-track owner workspace status and a static offline progress dashboard;
-15. integrity checkers for every declared workspace stage.
+1. quality-stage separation between transport smoke output, technical candidates, and owner-created creative candidates;
+2. local browser creative-review controls and hard-fail vocabulary;
+3. checksum-bound art-direction profile and owner-review contracts;
+4. fixed-seed model benchmark plan, result/contact-sheet validation, and owner model-selection review;
+5. deterministic identity-lock plan, result/consistency-sheet validation, and owner identity approval;
+6. identity-gated production variant planning/checking;
+7. formal checksum-bound owner review of each generated variant;
+8. production export that preserves the exact variant-set, identity/model, review, and PNG provenance;
+9. non-resynthesizing Phase F asset preparation that only trims transparent margins and copies visible RGBA pixels unchanged onto caller-authored canvases.
 
-## Completion proof
+These are software capabilities and fail-closed boundaries. Their presence must never be interpreted as automatic aesthetic approval or as evidence that the real runtime steps have occurred.
 
-Run from the repository root:
+## Software completion
 
-```bash
-PYTHONPATH=src python -m ai_illustration.release_audit release/mvp-v1.json
-python scripts/public_export_guard.py .
-python scripts/validate_repository.py
-PYTHONPATH=src python -m unittest discover -s tests
+Software MVP completion requires the release audit, repository validation, and complete automated regression suite to succeed across the declared quality-stage, art-direction, benchmark, identity-lock, variant-review, asset-preparation, generation, packaging, paper-theater, rendering, video-export, and workspace software surface.
+
+The audit remains read-only. It does not contact the network, start a subprocess, generate an image, write a review, install a model, or mutate the repository.
+
+## Content/runtime completion remains external
+
+Real project content is still incomplete until the owner/runtime evidence exists. At minimum this includes:
+
+- the canonical owner art-reference files;
+- the approved local ComfyUI installation and exact reviewed model/workflow artifacts;
+- the real three-family benchmark on the owner's target hardware;
+- owner selection of the model/base design from benchmark evidence;
+- real identity-lock runs and explicit owner identity approval;
+- generated pose/expression variants and explicit owner review of each production variant;
+- caller-authored asset-preparation geometry/isolation settings for final delivery;
+- source audio and any final timing/composition decisions;
+- checksum-pinned FFmpeg only when final video encoding is requested;
+- final publication/distribution decisions.
+
+The software audit therefore answers **“is the guarded software pipeline ready?”**, not **“is the artwork finished?”**.
+
+## Canonical audit command
+
+```text
+python -m ai_illustration.release_audit release/mvp-v1.json
 ```
 
-The release audit is non-mutating. It starts no external process and contacts no network endpoint. It verifies:
-
-- package version and installed console entry points;
-- all main and dedicated CLI command surfaces;
-- all 12 workspace checker kinds;
-- required modules, schemas, documents, and GitHub validation workflows;
-- the disabled legacy ComfyUI execution boundary;
-- protected source files for forbidden shell and external-URL patterns;
-- zero runtime Python dependencies;
-- a sorted SHA-256 inventory of critical release files.
-
-## Owner prerequisites for actual production
-
-Software completion does not invent or satisfy these owner-controlled inputs:
-
-- a locally installed and running ComfyUI instance;
-- an explicitly reviewed model, workflow, and any custom nodes;
-- licensing and commercial-use evidence appropriate to the owner's context;
-- final boke and tsukkomi identity selection;
-- human candidate and variant acceptance decisions;
-- caller-recorded or otherwise approved WAV audio;
-- an exact local FFmpeg executable;
-- the owner's composition, export, and publication decisions.
-
-The workspace dashboard reports these as explicit next actions when their artifacts are absent.
-
-## Deliberately excluded automatic effects
-
-The software never automatically:
-
-- installs or downloads ComfyUI, models, custom nodes, or FFmpeg;
-- selects a final character or approves an aesthetic result;
-- approves licensing or commercial use;
-- accesses credentials or remote hosted services;
-- publishes generated media;
-- converts a technically valid candidate into an accepted production asset.
-
-Those exclusions are release guarantees rather than missing implementation work.
+A successful result reports `complete=true` only for the software contract. Remaining human/runtime prerequisites stay explicit in `release/mvp-v1.json` and are not silently converted into completed content.
