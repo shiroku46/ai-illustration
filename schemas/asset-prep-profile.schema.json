@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ai-illustration/asset-prep-profile.schema.json",
+  "title": "Asset preparation profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "schema_version", "id", "version", "roles"],
+  "properties": {
+    "kind": {"const": "asset-prep-profile"},
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^asset-prep-profile-[0-9a-f]{16}$"},
+    "version": {"type": "string", "pattern": "^v[0-9]{3}$"},
+    "roles": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {"$ref": "#/$defs/role"}
+    }
+  },
+  "$defs": {
+    "fraction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["numerator", "denominator"],
+      "properties": {
+        "numerator": {"type": "integer", "minimum": 0, "maximum": 1000000000},
+        "denominator": {"type": "integer", "minimum": 1, "maximum": 1000000000}
+      }
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "target_canvas_width",
+        "target_canvas_height",
+        "target_anchor_x",
+        "target_anchor_y",
+        "source_anchor_policy",
+        "transparent_border_inset",
+        "max_border_alpha_pixels",
+        "min_visible_pixels",
+        "max_semitransparent_fraction"
+      ],
+      "properties": {
+        "role": {"enum": ["boke", "tsukkomi"]},
+        "target_canvas_width": {"type": "integer", "minimum": 1, "maximum": 8192},
+        "target_canvas_height": {"type": "integer", "minimum": 1, "maximum": 8192},
+        "target_anchor_x": {"type": "integer", "minimum": 0, "maximum": 8191},
+        "target_anchor_y": {"type": "integer", "minimum": 0, "maximum": 8191},
+        "source_anchor_policy": {"const": "bottom-center-visible-bounds"},
+        "transparent_border_inset": {"type": "integer", "minimum": 0, "maximum": 8192},
+        "max_border_alpha_pixels": {"type": "integer", "minimum": 0, "maximum": 67108864},
+        "min_visible_pixels": {"type": "integer", "minimum": 1, "maximum": 67108864},
+        "max_semitransparent_fraction": {"$ref": "#/$defs/fraction"}
+      }
+    }
+  }
+}
