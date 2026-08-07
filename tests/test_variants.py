@@ -300,8 +300,8 @@ class VariantTests(unittest.TestCase):
             "production",
             identity_evidence=self.identity_evidence,
         )
-        path = self.root / "production-variant-set.json"
-        _write(self.root, path.name, production)
+        path = Path(self.identity_tmp.name) / "production-variant-set.json"
+        path.write_text(json.dumps(production), encoding="utf-8")
         with self.assertRaisesRegex(VariantError, "IDENTITY_LOCK_REQUIRED"):
             check_variant_set(path, self.root)
         self.assertEqual(
