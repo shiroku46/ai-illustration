@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/variant-review-decision.schema.json",
+  "title": "Identity-aware variant owner review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind", "schema_version", "id", "variant_set_ref", "variant_set_sha256",
+    "variant_id", "png_sha256", "source_candidate_ref", "source_request_ref",
+    "source_candidate_sha256", "identity_gate", "identity_review_ref",
+    "identity_review_sha256", "identity_strategy_id", "identity_evidence_run_ids",
+    "identity_model", "decision", "result_state", "reviewer", "timestamp",
+    "hard_fail_categories", "observations"
+  ],
+  "properties": {
+    "kind": {"const": "variant-review-decision"},
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^variant-review-[0-9a-f]{20}$"},
+    "variant_set_ref": {"type": "string", "pattern": "^variant-set-[0-9a-f]{20}$"},
+    "variant_set_sha256": {"$ref": "#/$defs/sha256"},
+    "variant_id": {"type": "string", "pattern": "^variant-[0-9a-f]{20}$"},
+    "png_sha256": {"$ref": "#/$defs/sha256"},
+    "source_candidate_ref": {"$ref": "#/$defs/token"},
+    "source_request_ref": {"$ref": "#/$defs/token"},
+    "source_candidate_sha256": {"$ref": "#/$defs/sha256"},
+    "identity_gate": {"enum": ["evaluation-unlocked", "owner-approved"]},
+    "identity_review_ref": {"oneOf": [{"type": "string", "pattern": "^identity-review-[0-9a-f]{16}$"}, {"type": "null"}]},
+    "identity_review_sha256": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+    "identity_strategy_id": {"oneOf": [{"$ref": "#/$defs/token"}, {"type": "null"}]},
+    "identity_evidence_run_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/token"}},
+    "identity_model": {"oneOf": [{"$ref": "#/$defs/identityModel"}, {"type": "null"}]},
+    "decision": {"enum": ["accept", "reject", "needs_revision"]},
+    "result_state": {"enum": ["evaluation-accepted", "production-variant-approved", "rejected", "needs-revision"]},
+    "reviewer": {"type": "string", "minLength": 1, "maxLength": 200},
+    "timestamp": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "hard_fail_categories": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "malformed_or_missing_limb", "broken_joint_or_torso", "incoherent_clothing",
+          "face_asymmetry", "unintended_background", "generic_ai_style",
+          "identity_drift", "isolation_failure"
+        ]
+      }
+    },
+    "observations": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "notes": {"type": "string", "minLength": 1}
+  },
+  "$defs": {
+    "token": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "identityModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "profile_ref", "profile_sha256", "workflow_sha256"],
+      "properties": {
+        "family": {"$ref": "#/$defs/token"},
+        "profile_ref": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*@v[0-9]{3}$"},
+        "profile_sha256": {"$ref": "#/$defs/sha256"},
+        "workflow_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}
