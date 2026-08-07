@@ -14,7 +14,9 @@ from .benchmark_execute import RESULTS_FILE, BenchmarkExecutionError, status
 DEFAULT_LIMIT = 3
 MAX_LIMIT = 144
 MAX_TEXT_CHARS = 2000
-WINDOWS_PATH_RE = re.compile(r"(?i)\b[a-z]:\\(?:[^\r\n\"']*)")
+QUOTED_WINDOWS_PATH_RE = re.compile(r"(?i)([\"'])[a-z]:\\.*?\1")
+WINDOWS_PATH_RE = re.compile(r"(?i)\b[a-z]:\\[^\s\"']+")
+QUOTED_POSIX_PATH_RE = re.compile(r"([\"'])/(?:[^\r\n]*?)\1")
 POSIX_PATH_RE = re.compile(r"(?<![:A-Za-z0-9_])/(?:[^\s\"']*)")
 SECRET_VALUE_RE = re.compile(
     r"(?i)(?:bearer\s+[A-Za-z0-9._~+/=-]{8,}|(?:sk|ghp|github_pat)_[A-Za-z0-9_-]{8,})"
@@ -24,7 +26,9 @@ SECRET_VALUE_RE = re.compile(
 def _sanitize_text(value: Any) -> str:
     text = " ".join(str(value or "").replace("\x00", " ").split())
     text = SECRET_VALUE_RE.sub("[redacted]", text)
+    text = QUOTED_WINDOWS_PATH_RE.sub("[path]", text)
     text = WINDOWS_PATH_RE.sub("[path]", text)
+    text = QUOTED_POSIX_PATH_RE.sub("[path]", text)
     text = POSIX_PATH_RE.sub("[path]", text)
     return text[:MAX_TEXT_CHARS]
 
