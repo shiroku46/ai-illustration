@@ -48,9 +48,12 @@ class BenchmarkRunPackageTest(unittest.TestCase):
         self.assertEqual(8, hardware_document["vram_gb"])
         self.assertEqual(32, hardware_document["ram_gb"])
 
+        install_by_family = {entry["family"]: entry for entry in self.install["models"]}
         for model in self.plan["models"]:
             profile_document = json.loads((ROOT / model["profile_path"]).read_text(encoding="utf-8"))
-            self.assertEqual(model["profile_sha256"], mb.canonical_sha256(profile_document))
+            installed = install_by_family[model["family"]]
+            self.assertEqual(model["profile_sha256"], installed["profile_sha256"])
+            self.assertEqual(installed["profile_sha256"], mim._canonical_sha256(profile_document))
             self.assertEqual(
                 model["workflow_sha256"],
                 __import__("hashlib").sha256((ROOT / model["workflow_path"]).read_bytes()).hexdigest(),
