@@ -210,13 +210,23 @@ try {
         $installResult = Invoke-RepositoryScriptJson -Label "model installation" -Path $InstallScript -Parameters $installParameters
         Add-Stage -Name "models" -State $(if ($InstallModels) { "installed-or-verified" } else { "checked" }) -Detail $installResult
 
-        $offlineResult = Invoke-PythonJson -Label "offline readiness" -Arguments @(
-            "-m", "ai_illustration.benchmark_readiness", "offline-check",
-            $InstallManifestPath,
-            "--workspace-root", $RepoRoot,
-            "--comfyui-root", $resolvedComfy
-        )
-        Add-Stage -Name "offline-readiness" -State "ready" -Detail $offlineResult
+        try {
+            $offlineResult = Invoke-PythonJson -Label "offline readiness" -Arguments @(
+                "-m", "ai_illustration.benchmark_readiness", "offline-check",
+                $InstallManifestPath,
+                "--workspace-root", $RepoRoot,
+                "--comfyui-root", $resolvedComfy
+            )
+            Add-Stage -Name "offline-readiness" -State "ready" -Detail $offlineResult
+        }
+        catch {
+            if ($InstallModels -or $ExecuteBenchmark) {
+                throw
+            }
+            Add-Stage -Name "offline-readiness" -State "not-ready" -Detail ([ordered]@{
+                reason = $_.Exception.Message
+            })
+        }
     }
     else {
         $resolvedComfy = $null

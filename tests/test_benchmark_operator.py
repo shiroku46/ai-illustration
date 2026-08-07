@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +46,8 @@ class BenchmarkOperatorTest(unittest.TestCase):
         self.assertIn("-ExecuteBenchmark requires -ComfyUIRoot", source)
         self.assertIn('"--max-runs", [string]$MaxRuns', source)
         self.assertIn('"--execute"', source)
+        self.assertIn('if ($InstallModels -or $ExecuteBenchmark)', source)
+        self.assertIn('Add-Stage -Name "offline-readiness" -State "not-ready"', source)
 
     def test_coordinator_does_not_implement_network_process_launch_or_selection(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
@@ -101,6 +104,42 @@ class BenchmarkOperatorTest(unittest.TestCase):
         self.assertFalse(payload["effect_requests"]["finalize"])
         self.assertFalse(payload["automatic_selection"])
         self.assertFalse(local_root.exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows PowerShell contract")
+    def test_empty_comfyui_root_returns_planned_models_and_not_ready_status(self) -> None:
+        local_root = ROOT / "local"
+        self.assertFalse(local_root.exists())
+        with tempfile.TemporaryDirectory() as directory:
+            comfy = Path(directory) / "ComfyUI"
+            comfy.mkdir()
+            completed = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(SCRIPT),
+                    "-ComfyUIRoot",
+                    str(comfy),
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=30,
+            )
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            payload = json.loads(completed.stdout.strip())
+            self.assertTrue(payload["ok"])
+            stages = {item["name"]: item for item in payload["stages"]}
+            self.assertEqual("checked", stages["models"]["state"])
+            artifacts = stages["models"]["detail"]["artifacts"]
+            self.assertTrue(artifacts)
+            self.assertTrue(all(item["status"] == "planned-download" for item in artifacts))
+            self.assertEqual("not-ready", stages["offline-readiness"]["state"])
+            self.assertEqual([], list(comfy.iterdir()))
+            self.assertFalse(local_root.exists())
 
 
 if __name__ == "__main__":
