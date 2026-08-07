@@ -51,6 +51,7 @@ def _png_bytes() -> bytes:
 class VariantTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
+        self.identity_tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         payload = _png_bytes()
         (self.root / "candidate.png").write_bytes(payload)
@@ -98,13 +99,14 @@ class VariantTests(unittest.TestCase):
         self.identity_evidence = self._build_identity_evidence()
 
     def tearDown(self) -> None:
+        self.identity_tmp.cleanup()
         self.tmp.cleanup()
 
     def read_json(self, name: str) -> dict[str, object]:
         return json.loads((self.root / name).read_text(encoding="utf-8"))
 
     def _build_identity_evidence(self) -> IdentityEvidence:
-        identity_root = self.root / "identity-evidence"
+        identity_root = Path(self.identity_tmp.name)
         result_root = identity_root / "results"
         result_root.mkdir(parents=True)
         poses = ["front-neutral", "three-quarter", "seated-asymmetric"]
