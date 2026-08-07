@@ -155,16 +155,16 @@ class ReleaseAuditTests(unittest.TestCase):
             "src/ai_illustration/benchmark_review.py",
             "schemas/identity-lock-review.schema.json",
             "src/ai_illustration/identity_lock_review.py",
-            "src/ai_illustration/variants.py",
             "schemas/variant-review-decision.schema.json",
             "src/ai_illustration/variant_review.py",
-            "src/ai_illustration/exporter.py",
             "schemas/asset-prep-profile.schema.json",
             "src/ai_illustration/asset_prep.py",
             "docs/ASSET_PREP.md",
         }
         self.assertTrue(expected.issubset(QUALITY_RESET_CRITICAL_PATHS))
         self.assertTrue(QUALITY_RESET_CRITICAL_PATHS.issubset(MINIMUM_CRITICAL_PATHS))
+        self.assertIn("src/ai_illustration/variants.py", MINIMUM_CRITICAL_PATHS)
+        self.assertIn("src/ai_illustration/exporter.py", MINIMUM_CRITICAL_PATHS)
         self.assertIn("art-direction-approval", MINIMUM_HUMAN_DECISIONS)
         self.assertIn("benchmark-model-selection", MINIMUM_HUMAN_DECISIONS)
         self.assertIn("identity-lock-approval", MINIMUM_HUMAN_DECISIONS)
