@@ -1,6 +1,12 @@
 {
   "character_ref": "boke@v001",
-  "id": "variant-export-package-92749a683b81d3397f9c",
+  "id": "variant-export-package-38c40502dbf8e15977d9",
+  "identity_evidence_run_ids": [],
+  "identity_gate": "evaluation-unlocked",
+  "identity_model": null,
+  "identity_review_ref": null,
+  "identity_review_sha256": null,
+  "identity_strategy_id": null,
   "intent": "evaluation",
   "items": [
     {
@@ -30,5 +36,6 @@
   "source_candidate_sha256": "31e567633479d71554c5f5b00c7d831aeece9bde5b581216a37ccce20c3f2f66",
   "source_request_ref": "request-demo",
   "style_ref": "rough-flat@v001",
-  "variant_set_ref": "variant-set-f1ee3744ca71040a3b10"
+  "variant_set_ref": "variant-set-f1ee3744ca71040a3b10",
+  "variant_set_sha256": "5d6f1ea9e48db0e0e236b86b117dbce6ca72893f1e05959804fd212713d8a7fc"
 }
